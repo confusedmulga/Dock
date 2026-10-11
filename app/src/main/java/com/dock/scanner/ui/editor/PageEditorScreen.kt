@@ -1,5 +1,8 @@
 package com.dock.scanner.ui.editor
 
+import androidx.compose.foundation.shape.CornerSize
+import androidx.compose.foundation.shape.CornerBasedShape
+import com.dock.scanner.ui.theme.DockColors
 import androidx.activity.compose.BackHandler
 import androidx.annotation.DrawableRes
 import androidx.compose.animation.AnimatedContent
@@ -30,9 +33,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.Delete
@@ -91,8 +96,10 @@ enum class EditorTool(val label: String, @param:DrawableRes val icon: Int) {
     Eraser("Eraser", R.drawable.ic_eraser),
     Markup("Markup", R.drawable.ic_markup),
     Adjust("Adjust", R.drawable.ic_adjust),
-    Reorder("Reorder", R.drawable.ic_reorder),
 }
+
+/** Bottom panels round only their top corners, like a bottom sheet. */
+private fun CornerBasedShape.topOnly() = copy(bottomStart = CornerSize(0.dp), bottomEnd = CornerSize(0.dp))
 
 private val PenColors = listOf(
     0xFF111111, 0xFFFFFFFF, 0xFFE53935, 0xFFFB8C00, 0xFFFDD835, 0xFF43A047, 0xFF1E88E5, 0xFF8E24AA,
@@ -104,11 +111,12 @@ fun PageEditorScreen(
     pageId: String,
     onBack: () -> Unit,
     onRetake: (String) -> Unit,
-    onReorder: () -> Unit,
 ) {
     val all by vm.pages.collectAsStateWithLifecycle()
     val sheets by vm.sheets.collectAsStateWithLifecycle()
-    val index = sheets.indexOfFirst { it.id == pageId }
+    // The page strip switches pages here, without leaving the editor.
+    var currentId by rememberSaveable { mutableStateOf(pageId) }
+    val index = sheets.indexOfFirst { it.id == currentId }
     if (index < 0) {
         LaunchedEffect(Unit) { onBack() }
         return
@@ -151,8 +159,11 @@ fun PageEditorScreen(
             if (page.processing) CircularProgressIndicator(Modifier.size(20.dp).padding(end = 4.dp), strokeWidth = 2.dp)
             if (tool == null) {
                 IconButton(onClick = {
+                    // Land on the neighbouring page; leave only when this was the last one.
+                    val next = sheets.getOrNull(index + 1) ?: sheets.getOrNull(index - 1)
+                    if (next != null) currentId = next.id
                     vm.delete(page.id)
-                    onBack()
+                    if (next == null) onBack()
                 }) { Icon(Icons.Filled.Delete, contentDescription = "Delete page") }
             }
         }
@@ -206,8 +217,23 @@ fun PageEditorScreen(
             }
         }
 
-        Surface(color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.navigationBarsPadding()) {
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            shape = MaterialTheme.shapes.extraLarge.topOnly(),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(Modifier.navigationBarsPadding().padding(top = 6.dp)) {
+                if (sheets.size > 1) {
+                    PageStrip(
+                        sheets = sheets,
+                        pagesById = pagesById,
+                        currentId = page.id,
+                        onSelect = {
+                            picking = false
+                            currentId = it
+                        },
+                    )
+                }
                 AnimatedContent(
                     targetState = tool,
                     transitionSpec = { fadeIn(DockMotion.standard()) togetherWith fadeOut(DockMotion.standard()) using SizeTransform(clip = false) },
@@ -273,10 +299,59 @@ fun PageEditorScreen(
                         picking = false
                         when (picked) {
                             EditorTool.Retake -> onRetake(page.id)
-                            EditorTool.Reorder -> onReorder()
                             else -> tool = if (tool == picked) null else picked
                         }
                     },
+                )
+            }
+        }
+    }
+}
+
+/** Every page of the scan; the open one is outlined and kept in view. */
+@Composable
+private fun PageStrip(sheets: List<Page>, pagesById: Map<String, Page>, currentId: String, onSelect: (String) -> Unit) {
+    val state = rememberLazyListState()
+    val index = sheets.indexOfFirst { it.id == currentId }
+    LaunchedEffect(index) { if (index >= 0) state.animateScrollToItem((index - 2).coerceAtLeast(0)) }
+    LazyRow(
+        state = state,
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        itemsIndexed(sheets, key = { _, p -> p.id }) { i, p ->
+            val selected = p.id == currentId
+            val shape = MaterialTheme.shapes.small
+            Box(
+                Modifier
+                    .size(width = 46.dp, height = 62.dp)
+                    .clip(shape)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                    .border(
+                        if (selected) 2.dp else 1.dp,
+                        if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                        shape,
+                    )
+                    .clickable(onClickLabel = "Edit page ${i + 1}") { onSelect(p.id) }
+                    .padding(3.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                val layout = p.layout
+                if (layout != null) {
+                    SheetView(layout, pagesById)
+                } else if (p.output != null) {
+                    AsyncImage(model = p.output, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+                }
+                Text(
+                    "${i + 1}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.inverseOnSurface,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .clip(MaterialTheme.shapes.extraSmall)
+                        .background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.inverseSurface.copy(alpha = 0.7f))
+                        .padding(horizontal = 4.dp),
                 )
             }
         }
@@ -298,13 +373,13 @@ private fun ToolButton(tool: EditorTool, selected: Boolean, onClick: () -> Unit)
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) 0.9f else 1f, DockMotion.press(), label = "toolScale")
-    val tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+    val tint = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
     Column(
         Modifier
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .widthIn(min = 68.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent)
+            .clip(MaterialTheme.shapes.large)
+            .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
             .clickable(interaction, indication = null, role = Role.Tab, onClick = onClick)
             .padding(horizontal = 8.dp, vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -328,7 +403,7 @@ private fun InfoPanel(text: String) = PanelColumn {
 @Composable
 private fun ApplyToAllRow(checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { onChange(!checked) }.padding(vertical = 4.dp),
+        Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).clickable { onChange(!checked) }.padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text("Apply to all pages", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
@@ -569,7 +644,7 @@ private fun AdjustPanel(
                         candidates.forEach { candidate ->
                             Column(
                                 Modifier
-                                    .clip(RoundedCornerShape(10.dp))
+                                    .clip(MaterialTheme.shapes.medium)
                                     .clickable {
                                         vm.addToSheet(page.id, candidate.id)
                                         onSelect(candidate.id)
@@ -581,7 +656,7 @@ private fun AdjustPanel(
                                 AsyncImage(
                                     model = candidate.output,
                                     contentDescription = null,
-                                    modifier = Modifier.size(width = 84.dp, height = 112.dp).background(Color.White),
+                                    modifier = Modifier.size(width = 84.dp, height = 112.dp).background(DockColors.Paper),
                                 )
                                 Text("Page ${sheets.indexOf(candidate) + 1}", style = MaterialTheme.typography.labelMedium)
                             }
@@ -614,9 +689,9 @@ private fun CropMode(page: Page, onApply: (Quad) -> Unit, onRotate: () -> Unit, 
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
         }
-        Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
+        Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = MaterialTheme.shapes.extraLarge.topOnly()) {
             Row(
-                Modifier.fillMaxWidth().navigationBarsPadding().padding(8.dp),
+                Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 8.dp, end = 8.dp, top = 12.dp, bottom = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {

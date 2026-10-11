@@ -20,8 +20,13 @@ object PageProcessor {
 
     private const val EDGE_TRIM = 0.004
 
-    /** Must be called once before any OpenCV use (e.g. in Application.onCreate). */
-    fun initOpenCv(): Boolean = OpenCVLoader.initLocal()
+    private val openCvLoaded: Boolean by lazy { OpenCVLoader.initLocal() }
+
+    /**
+     * Loads OpenCV's native library (once; later calls return immediately). Safe to call from
+     * any thread, and blocks until loading finishes if another thread started it.
+     */
+    fun initOpenCv(): Boolean = openCvLoaded
 
     /** Upright pixel size of a JPEG, honouring its EXIF orientation. */
     fun uprightSize(file: File): Pair<Int, Int> {
@@ -38,6 +43,7 @@ object PageProcessor {
 
     /** Auto-detects the document in a photo file. Decodes at 1/4 resolution, so it is fast. */
     fun detect(file: File, detector: DocumentDetector): Quad? {
+        initOpenCv()
         val gray = loadUpright(file, Imgcodecs.IMREAD_REDUCED_GRAYSCALE_4)
         try {
             return detector.detect(gray)
@@ -56,6 +62,7 @@ object PageProcessor {
         maxSide: Int = 2480,
         jpegQuality: Int = 85,
     ): Pair<Int, Int> {
+        initOpenCv()
         val src = loadUpright(source, Imgcodecs.IMREAD_COLOR)
         val warped = warp(src, quad, maxSide)
         src.release()
@@ -88,7 +95,8 @@ object PageProcessor {
         val srcPts = MatOfPoint2f(*quad.corners.map { Point(it.x * w.toDouble(), it.y * h.toDouble()) }.toTypedArray())
         // Map the quad slightly beyond the output so the outermost pixels are dropped: a
         // corner placed a hair off the paper otherwise leaves a dark sliver along the edge.
-        val m = EDGE_TRIM * max(outW, outH)
+        // A full-frame quad is a page imported from a PDF, not a photo: keep every pixel.
+        val m = if (quad == Quad.FULL) 0.0 else EDGE_TRIM * max(outW, outH)
         val dstPts = MatOfPoint2f(Point(-m, -m), Point(outW + m, -m), Point(outW + m, outH + m), Point(-m, outH + m))
         val transform = Imgproc.getPerspectiveTransform(srcPts, dstPts)
         val out = Mat()

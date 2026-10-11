@@ -1,5 +1,7 @@
 package com.dock.scanner.ui.viewer
 
+import com.dock.scanner.ui.theme.DockColors
+import androidx.compose.foundation.shape.CircleShape
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.pdf.PdfRenderer
@@ -21,7 +23,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.Share
@@ -101,7 +102,7 @@ fun PdfViewerScreen(uri: Uri, name: String, onBack: () -> Unit) {
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier
-                        .glass(hazeState, RoundedCornerShape(24.dp), elevation = 8.dp)
+                        .glass(hazeState, CircleShape, elevation = 8.dp)
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                 )
             }
@@ -127,14 +128,14 @@ private fun PdfPage(document: PdfRenderer, lock: Mutex, index: Int, widthPx: Int
             }
         }
     }
-    val shape = RoundedCornerShape(4.dp)
+    val shape = MaterialTheme.shapes.extraSmall
     val bitmap = page
     Box(
         Modifier
             .fillMaxWidth()
             .aspectRatio(bitmap?.let { it.width.toFloat() / it.height } ?: (1 / 1.414f))
             .shadow(3.dp, shape)
-            .background(androidx.compose.ui.graphics.Color.White, shape),
+            .background(DockColors.Paper, shape),
     ) {
         if (bitmap != null) {
             Image(bitmap.asImageBitmap(), contentDescription = "Page ${index + 1}", contentScale = ContentScale.FillBounds, modifier = Modifier.fillMaxSize())

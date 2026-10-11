@@ -13,7 +13,9 @@ saves a PDF. No account, no cloud, no AI, no network access: the app doesn't eve
 - Filters: Original, Auto (shadow removal), Grayscale, Black & White
 - Import photos from the gallery
 - Multi-page PDFs saved straight into a real folder (Documents/Dock by default)
-- **Home**: all scans, newest first, with search · **Shelf**: organise PDFs into folders
+- **Home**: tools — scan, edit PDF, compress, PDF to images, merge, split, images to PDF
+- **Files**: every PDF, newest first, with search · **Shelf**: organise PDFs into folders
+- Page editor: crop, filters, brightness/contrast, eraser, markup, paper sizes, multi-page sheets
 - Built-in PDF viewer; share, rename, move and delete from the list
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for what's next.
@@ -23,6 +25,7 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for what's next.
 | Module | What it does |
 |---|---|
 | `core:scanner` | Image pipeline with no UI: `DocumentDetector` (OpenCV edge detection), `PageProcessor` (warp, filters), `ImageFilters`, `JpegPdfWriter` (tiny dependency-free PDF writer) |
+| `core:pdf` | PDF operations that keep text and vectors: merge, split, compress (PdfBox-Android) |
 | `app` | Compose UI: storage setup, main shell (glass island with Home / Shelf tabs + camera bubble), camera, review + save, page editor, PDF viewer. `data/storage/DockLibrary` wraps the Storage Access Framework |
 
 ## Building
@@ -40,7 +43,7 @@ Min SDK 26 (Android 8.0). The debug APK bundles native code for `arm64-v8a` and 
 
 ## Tech
 
-Kotlin · Jetpack Compose · Material 3 · CameraX · OpenCV · Coil · Haze (backdrop blur) · Navigation Compose
+Kotlin · Jetpack Compose · Material 3 · CameraX · OpenCV · PdfBox-Android · Coil · Haze (backdrop blur) · Navigation Compose
 
 ## License
 

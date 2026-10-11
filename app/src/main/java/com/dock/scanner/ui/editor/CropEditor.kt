@@ -1,5 +1,6 @@
 package com.dock.scanner.ui.editor
 
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -118,6 +119,7 @@ fun CropEditor(
                 contentScale = ContentScale.FillBounds,
                 modifier = Modifier
                     .offset { IntOffset(area.left.roundToInt(), area.top.roundToInt()) }
+                    .clip(MaterialTheme.shapes.extraSmall)
                     .size(with(density) { DpSize(dispW.toDp(), dispH.toDp()) }),
             )
             Canvas(Modifier.fillMaxSize()) {

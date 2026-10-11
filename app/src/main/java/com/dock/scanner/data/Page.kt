@@ -32,6 +32,8 @@ data class Page(
     val output: File? = null,
     val outputWidth: Int = 0,
     val outputHeight: Int = 0,
+    /** Size in points of the PDF page this came from (unrotated); keeps edited PDFs at their paper size. */
+    val pdfPageSize: Pair<Float, Float>? = null,
     /** Paper sheet this page is laid out on, or null to export the image as its own page size. */
     val layout: SheetLayout? = null,
     /** Set when this page is placed on another page's sheet instead of being a PDF page itself. */

@@ -1,5 +1,6 @@
 package com.dock.scanner.ui.components
 
+import com.dock.scanner.ui.theme.DockColors
 import android.content.ClipData
 import android.content.Context
 import android.content.Intent
@@ -22,7 +23,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -56,6 +56,9 @@ import com.dock.scanner.R
 import com.dock.scanner.data.storage.DockLibrary
 import com.dock.scanner.data.storage.LibraryItem
 import com.dock.scanner.data.storage.PdfPreviews
+import com.dock.scanner.ui.tools.PdfTool
+import coil3.compose.AsyncImage
+import androidx.compose.material3.HorizontalDivider
 import java.util.Calendar
 
 /** Large, tightly tracked screen title with optional subtitle and trailing actions. */
@@ -84,7 +87,7 @@ fun LargeTitle(
                 subtitle,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
         }
@@ -92,22 +95,24 @@ fun LargeTitle(
 }
 
 @Composable
-fun SectionHeader(text: String, modifier: Modifier = Modifier) {
+fun SectionHeader(text: String, modifier: Modifier = Modifier, start: Dp = 20.dp) {
     Text(
         text,
         style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 4.dp),
+        modifier = modifier.padding(start = start, end = 20.dp, top = 18.dp, bottom = 4.dp),
     )
 }
 
-/** What a PDF row can do; all optional so screens only offer what makes sense there. */
+/** What a file row can do. */
 class PdfActions(
     val onOpen: (LibraryItem) -> Unit,
     val onShare: (LibraryItem) -> Unit,
     val onRename: (LibraryItem) -> Unit,
     val onMove: (LibraryItem) -> Unit,
     val onDelete: (LibraryItem) -> Unit,
+    val onEdit: (LibraryItem) -> Unit = {},
+    val onTool: (PdfTool, LibraryItem) -> Unit = { _, _ -> },
 )
 
 @Composable
@@ -115,6 +120,7 @@ fun PdfRow(item: LibraryItem, actions: PdfActions, showFolder: Boolean, modifier
     val context = LocalContext.current
     val preview by rememberPdfPreview(item, 48.dp)
     var menu by remember { mutableStateOf(false) }
+    val thumbSize = Modifier.size(width = 48.dp, height = 64.dp)
 
     Row(
         modifier
@@ -123,13 +129,23 @@ fun PdfRow(item: LibraryItem, actions: PdfActions, showFolder: Boolean, modifier
             .padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        PdfThumbnail(preview?.thumbnail, Modifier.size(width = 48.dp, height = 64.dp))
+        if (item.isImage) {
+            AsyncImage(
+                model = item.uri,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = thumbSize.clip(MaterialTheme.shapes.extraSmall).background(MaterialTheme.colorScheme.surfaceContainerHigh),
+            )
+        } else {
+            PdfThumbnail(preview?.thumbnail, thumbSize)
+        }
         Column(Modifier.weight(1f).padding(start = 14.dp)) {
             Text(item.displayName, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(2.dp))
             val details = buildList {
                 add(friendlyDate(context, item.lastModified))
-                preview?.pageCount?.let { add(if (it == 1) "1 page" else "$it pages") }
+                if (item.isImage) add(item.extension.uppercase())
+                else preview?.pageCount?.let { add(if (it == 1) "1 page" else "$it pages") }
                 add(Formatter.formatShortFileSize(context, item.size))
             }.joinToString(" · ")
             Text(details, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
@@ -156,6 +172,29 @@ fun PdfRow(item: LibraryItem, actions: PdfActions, showFolder: Boolean, modifier
             }
             // Anchored to the button that opened it.
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                if (item.isPdf) {
+                    DropdownMenuItem(
+                        text = { Text("Edit") },
+                        leadingIcon = { Icon(painterResource(R.drawable.ic_edit_doc), null) },
+                        onClick = { menu = false; actions.onEdit(item) },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Compress") },
+                        leadingIcon = { Icon(painterResource(R.drawable.ic_compress), null) },
+                        onClick = { menu = false; actions.onTool(PdfTool.Compress, item) },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Convert to images") },
+                        leadingIcon = { Icon(painterResource(R.drawable.ic_image), null) },
+                        onClick = { menu = false; actions.onTool(PdfTool.ToImages, item) },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Split") },
+                        leadingIcon = { Icon(painterResource(R.drawable.ic_split), null) },
+                        onClick = { menu = false; actions.onTool(PdfTool.Split, item) },
+                    )
+                    HorizontalDivider()
+                }
                 DropdownMenuItem(
                     text = { Text("Share") },
                     leadingIcon = { Icon(Icons.Filled.Share, null) },
@@ -193,11 +232,11 @@ fun rememberPdfPreview(item: LibraryItem, width: Dp) = run {
 
 @Composable
 fun PdfThumbnail(bitmap: android.graphics.Bitmap?, modifier: Modifier = Modifier) {
-    val shape = RoundedCornerShape(6.dp)
+    val shape = MaterialTheme.shapes.extraSmall
     Box(
         modifier
             .clip(shape)
-            .background(if (bitmap != null) Color.White else MaterialTheme.colorScheme.surfaceContainerHigh)
+            .background(if (bitmap != null) DockColors.Paper else MaterialTheme.colorScheme.surfaceContainerHigh)
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f), shape),
         contentAlignment = Alignment.Center,
     ) {
@@ -257,9 +296,16 @@ fun dateSection(millis: Long, now: Long = System.currentTimeMillis()): String {
     }
 }
 
-fun shareDocument(context: Context, uri: Uri, name: String) {
+/** Opens a file (e.g. an exported page image) in the user's viewer app. */
+fun viewFile(context: Context, item: LibraryItem) {
+    val view = Intent(Intent.ACTION_VIEW).setDataAndType(item.uri, item.mimeType).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    runCatching { context.startActivity(view) }
+        .onFailure { android.widget.Toast.makeText(context, "No app can open this file", android.widget.Toast.LENGTH_SHORT).show() }
+}
+
+fun shareDocument(context: Context, uri: Uri, name: String, mimeType: String = DockLibrary.MIME_PDF) {
     val send = Intent(Intent.ACTION_SEND).apply {
-        type = DockLibrary.MIME_PDF
+        type = mimeType
         putExtra(Intent.EXTRA_STREAM, uri)
         clipData = ClipData.newRawUri(name, uri)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)

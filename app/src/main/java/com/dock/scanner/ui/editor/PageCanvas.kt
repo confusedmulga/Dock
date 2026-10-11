@@ -1,5 +1,7 @@
 package com.dock.scanner.ui.editor
 
+import androidx.compose.ui.draw.clip
+import androidx.compose.material3.MaterialTheme
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Canvas
@@ -96,7 +98,8 @@ fun PageCanvas(
                 .offset { IntOffset(((boxW - w) / 2).roundToInt(), ((boxH - h) / 2).roundToInt()) }
                 .size(with(density) { DpSize(w.toDp(), h.toDp()) })
                 .align(Alignment.TopStart)
-                .shadow(6.dp)
+                .shadow(6.dp, MaterialTheme.shapes.extraSmall)
+                .clip(MaterialTheme.shapes.extraSmall)
                 // One handler for both modes: two separate detectors would fight over who
                 // consumes the touch-down, and the loser never sees the gesture.
                 .pointerInput(Unit) {

@@ -25,7 +25,6 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -64,9 +63,9 @@ object GlassColors {
         @Composable get() = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.52f)
         else MaterialTheme.colorScheme.surface.copy(alpha = 0.52f)
 
-    /** Pill behind the selected tab. */
+    /** Pill behind the selected tab: Material 3's navigation indicator role. */
     val selected: Color
-        @Composable get() = if (isDark) Color(0x1FFFFFFF) else Color(0x14000000)
+        @Composable get() = MaterialTheme.colorScheme.secondaryContainer
 }
 
 /**
@@ -117,6 +116,7 @@ fun StatusBarBlur(state: HazeState, modifier: Modifier = Modifier) {
 
 enum class MainTab(val label: String, @param:DrawableRes val icon: Int, @param:DrawableRes val activeIcon: Int) {
     Home("Home", R.drawable.ic_home_outline, R.drawable.ic_home),
+    Files("Files", R.drawable.ic_doc_outline, R.drawable.ic_doc),
     Shelf("Shelf", R.drawable.ic_folder_outline, R.drawable.ic_folder),
 }
 
@@ -130,7 +130,7 @@ fun GlassIsland(
 ) {
     Row(
         modifier
-            .glass(state, RoundedCornerShape(30.dp))
+            .glass(state, CircleShape)
             .padding(horizontal = 6.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -148,7 +148,7 @@ private fun IslandTab(tab: MainTab, selected: Boolean, onClick: () -> Unit) {
     val scale by animateFloatAsState(if (pressed) 0.9f else 1f, DockMotion.press(), label = "tabScale")
     val fill by animateColorAsState(if (selected) GlassColors.selected else Color.Transparent, DockMotion.standard(), label = "tabFill")
     val horizontal by animateDpAsState(if (selected) 14.dp else 11.dp, DockMotion.standard(), label = "tabPad")
-    val ink = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+    val ink = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
 
     Row(
         Modifier
@@ -157,7 +157,7 @@ private fun IslandTab(tab: MainTab, selected: Boolean, onClick: () -> Unit) {
                 scaleX = scale
                 scaleY = scale
             }
-            .clip(RoundedCornerShape(24.dp))
+            .clip(CircleShape)
             .background(fill)
             .selectable(selected, interactionSource = interaction, indication = null, role = Role.Tab, onClick = onClick)
             .padding(horizontal = horizontal, vertical = 11.dp),

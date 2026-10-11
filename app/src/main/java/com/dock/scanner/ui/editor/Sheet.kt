@@ -1,5 +1,6 @@
 package com.dock.scanner.ui.editor
 
+import com.dock.scanner.ui.theme.DockColors
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -55,7 +56,7 @@ fun SheetView(
 ) {
     val density = LocalDensity.current
     // Clipped like the PDF page, which only shows what's on the paper.
-    BoxWithConstraints(modifier.aspectRatio(layout.aspect).clipToBounds().background(Color.White)) {
+    BoxWithConstraints(modifier.aspectRatio(layout.aspect).clipToBounds().background(DockColors.Paper)) {
         val sheetW = constraints.maxWidth.toFloat()
         val sheetH = constraints.maxHeight.toFloat()
         layout.items.forEach { item ->

@@ -35,7 +35,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Badge
@@ -228,7 +227,7 @@ private fun CameraContent(vm: ScanViewModel, onDone: () -> Unit, onImported: () 
 
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
             // 3:4 matches the sensor, so the photo contains exactly what the preview shows.
-            Box(Modifier.aspectRatio(3f / 4f)) {
+            Box(Modifier.aspectRatio(3f / 4f).clip(MaterialTheme.shapes.extraLarge)) {
                 AndroidView(
                     factory = { ctx ->
                         PreviewView(ctx).apply {
@@ -255,7 +254,7 @@ private fun CameraContent(vm: ScanViewModel, onDone: () -> Unit, onImported: () 
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(12.dp)
-                        .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(50))
+                        .background(Color.Black.copy(alpha = 0.55f), CircleShape)
                         .padding(horizontal = 14.dp, vertical = 6.dp),
                 )
             }
@@ -302,8 +301,8 @@ private fun CameraContent(vm: ScanViewModel, onDone: () -> Unit, onImported: () 
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
                                 .size(52.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .border(2.dp, Color.White, RoundedCornerShape(8.dp))
+                                .clip(MaterialTheme.shapes.small)
+                                .border(2.dp, Color.White, MaterialTheme.shapes.small)
                                 .clickable(onClick = onDone),
                         )
                     }

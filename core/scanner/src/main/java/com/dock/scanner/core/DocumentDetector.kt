@@ -22,6 +22,11 @@ class DocumentDetector(
     private val workSize: Int = 480,
     private val minAreaFraction: Double = 0.08,
 ) {
+    init {
+        // OpenCV loads in the background at app start; wait here if it hasn't finished yet.
+        PageProcessor.initOpenCv()
+    }
+
     private val closeKernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(9.0, 9.0))
     private val dilateKernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(3.0, 3.0))
     private val supportKernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(5.0, 5.0))

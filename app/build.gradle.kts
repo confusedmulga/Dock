@@ -46,6 +46,7 @@ kotlin {
 
 dependencies {
     implementation(project(":core:scanner"))
+    implementation(project(":core:pdf"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)

@@ -20,6 +20,9 @@ import com.dock.scanner.data.Placement
 import com.dock.scanner.data.SheetLayout
 import com.dock.scanner.data.StrokeKind
 import com.dock.scanner.data.storage.DockLibrary
+import com.dock.scanner.data.storage.LibraryItem
+import com.dock.scanner.data.tools.PdfSources
+import com.dock.scanner.pdf.PasswordProtectedException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.Channel
@@ -46,6 +49,9 @@ import kotlin.math.sqrt
 sealed interface UiEvent {
     data class Message(val text: String) : UiEvent
 }
+
+/** The PDF being edited: saving can write back to [item], or make a copy. */
+data class EditTarget(val name: String, val item: LibraryItem?)
 
 /**
  * Holds the current scan session: the pages captured so far and their processing state.
@@ -86,6 +92,13 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Set by the editor's Reorder tool; the review grid then lets pages be dragged. */
     val reorderMode = MutableStateFlow(false)
+
+    /** Non-null while the session is an opened PDF rather than a new scan. */
+    val editTarget = MutableStateFlow<EditTarget?>(null)
+
+    /** Progress (0..1) while a PDF's pages are being loaded for editing. */
+    private val _opening = MutableStateFlow<Float?>(null)
+    val opening: StateFlow<Float?> = _opening.asStateFlow()
 
     private val _events = Channel<UiEvent>(Channel.BUFFERED)
     val events = _events.receiveAsFlow()
@@ -173,6 +186,62 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Loads every page of a PDF into the session as an editable page (rendered at 200 dpi),
+     * so it can be edited with the same tools as a scan.
+     */
+    fun openPdf(uri: Uri, item: LibraryItem?, onReady: () -> Unit) {
+        if (_opening.value != null) return
+        clear()
+        _opening.value = 0f
+        val resolver = getApplication<Application>().contentResolver
+        viewModelScope.launch {
+            try {
+                val name = item?.displayName ?: withContext(Dispatchers.IO) { PdfSources.describe(resolver, uri).name }
+                val pages = withContext(Dispatchers.IO) {
+                    PdfSources.withRenderer(resolver, uri) { renderer ->
+                        List(renderer.pageCount) { index ->
+                            val (bitmap, size) = PdfSources.render(renderer, index, dpi = 200, maxSide = 2800)
+                            val width = bitmap.width
+                            val height = bitmap.height
+                            val file = newCaptureFile()
+                            try {
+                                file.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 92, it) }
+                            } finally {
+                                bitmap.recycle()
+                            }
+                            _opening.value = (index + 1f) / renderer.pageCount
+                            Page(
+                                id = UUID.randomUUID().toString(),
+                                sequence = sequence.incrementAndGet(),
+                                source = file,
+                                sourceWidth = width,
+                                sourceHeight = height,
+                                quad = Quad.FULL,
+                                detectedQuad = null,
+                                filter = PageFilter.ORIGINAL,
+                                rotation = 0,
+                                pdfPageSize = size,
+                            )
+                        }
+                    }
+                }
+                if (pages.isEmpty()) error("This PDF has no pages")
+                editTarget.value = EditTarget(name, item)
+                _pages.value = pages
+                pages.forEach { render(it.id) }
+                onReady()
+            } catch (e: PasswordProtectedException) {
+                message("Password-protected PDFs can't be opened yet")
+            } catch (e: Exception) {
+                clear()
+                message("Couldn't open the PDF: ${e.message}")
+            } finally {
+                _opening.value = null
+            }
+        }
+    }
+
     // endregion
 
     // region Page edits
@@ -242,6 +311,7 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
         val old = _pages.value
         _pages.value = emptyList()
         reorderMode.value = false
+        editTarget.value = null
         old.forEach {
             it.source.delete()
             it.base?.delete()
@@ -374,7 +444,16 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
      * Writes the session as a PDF into the library folder [parentId], then clears the session.
      * The PDF is created first and removed again if writing fails, so no empty files are left behind.
      */
-    fun saveToLibrary(library: DockLibrary, root: Uri, parentId: String, name: String, onSaved: (String) -> Unit) {
+    fun saveToLibrary(library: DockLibrary, root: Uri, parentId: String, name: String, onSaved: (String) -> Unit) =
+        save(onSaved, name) { library.createPdf(root, parentId, name) ?: error("Couldn't create the file") }
+
+    /** Writes the edited PDF back over the original file, renaming it if the name changed. */
+    fun saveOverOriginal(library: DockLibrary, item: LibraryItem, name: String, onSaved: (String) -> Unit) =
+        save(onSaved, name, replacing = true) {
+            if (name != item.displayName) library.rename(item, name) ?: error("Couldn't rename") else item.uri
+        }
+
+    private fun save(onSaved: (String) -> Unit, name: String, replacing: Boolean = false, target: () -> Uri) {
         if (_exporting.value || _pages.value.isEmpty()) return
         _exporting.value = true
         val resolver = getApplication<Application>().contentResolver
@@ -384,12 +463,21 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
                 val pages = _pages.first { list -> list.none { it.processing } }
                 withContext(Dispatchers.IO) {
                     val specs = pdfPages(pages)
-                    val uri = library.createPdf(root, parentId, name) ?: error("Couldn't create the file")
-                    try {
-                        resolver.openOutputStream(uri, "wt")!!.use { JpegPdfWriter().writePages(specs, it) }
-                    } catch (e: Exception) {
-                        runCatching { DocumentsContract.deleteDocument(resolver, uri) }
-                        throw e
+                    if (replacing) {
+                        // Write to a temp file first, so a failure can't leave the original half-written.
+                        val tmp = File(sessionDir, "replace.pdf")
+                        tmp.outputStream().use { JpegPdfWriter().writePages(specs, it) }
+                        val uri = target()
+                        resolver.openOutputStream(uri, "wt")!!.use { out -> tmp.inputStream().use { it.copyTo(out) } }
+                        tmp.delete()
+                    } else {
+                        val uri = target()
+                        try {
+                            resolver.openOutputStream(uri, "wt")!!.use { JpegPdfWriter().writePages(specs, it) }
+                        } catch (e: Exception) {
+                            runCatching { DocumentsContract.deleteDocument(resolver, uri) }
+                            throw e
+                        }
                     }
                 }
                 clear()
@@ -409,7 +497,15 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
             val layout = page.layout
             if (layout == null) {
                 val out = page.output ?: error("A page isn't ready")
-                val (w, h) = JpegPdfWriter.FIT_A4_WIDTH.size(JpegPdfWriter.readJpegInfo(out))
+                val info = JpegPdfWriter.readJpegInfo(out)
+                val original = page.pdfPageSize
+                val (w, h) = if (original != null) {
+                    // Pages from an opened PDF keep their paper width.
+                    val width = if (page.rotation % 180 == 0) original.first else original.second
+                    width to width * info.height / info.width
+                } else {
+                    JpegPdfWriter.FIT_A4_WIDTH.size(info)
+                }
                 JpegPdfWriter.PageSpec(w, h, listOf(JpegPdfWriter.PlacedImage(out, 0f, 0f, w, h)))
             } else {
                 val sheetW = layout.widthPt

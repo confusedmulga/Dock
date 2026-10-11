@@ -50,19 +50,20 @@ No database to get out of sync.
 - [x] Built-in PDF viewer
 - [x] Design pass with the apple-design skill: large tight titles, springs, glass chrome
 - [ ] Keep an unsaved scan across process death (draft session on disk)
-- [ ] Swipe between pages in the editor
+- [ ] Swipe between pages in the editor (the page strip covers switching for now)
 - [ ] Add pages to an existing PDF
 - [ ] Delete with undo instead of a confirmation dialog
 - [ ] Pinch-zoom in the viewer
 - [ ] Move UI strings to `strings.xml` (ready for translations)
 
-## Phase 2.5: Page editor ← we are here
+## Phase 2.5: Page editor ✅
 
 Two-stage rendering: the expensive OpenCV base (crop, perspective, filter, rotation) only
 re-runs when those change; brightness/contrast and ink are composited on top cheaply and
 previewed live with the same math.
 
-- [x] Toolbar in order: Retake · Crop · Edit text · Filters · Bright · Eraser · Markup · Adjust · Reorder
+- [x] Toolbar in order: Retake · Crop · Edit text · Filters · Bright · Eraser · Markup · Adjust
+- [x] Page strip above the tools: tap any page to switch to it without leaving the editor
 - [x] Retake: camera replaces the page's photo, keeping its filter and brightness
 - [x] Crop (with rotate)
 - [x] Edit text: placeholder until OCR (Phase 5)
@@ -73,11 +74,33 @@ previewed live with the same math.
 - [x] Adjust: A3/A4/A5/Letter/Legal, portrait/landscape; move (drag) and resize (pinch or
       slider) the page; put several pages on one sheet (e.g. ID card front + back); pages
       stay on the paper; exported as vectors, no re-rasterizing
-- [x] Reorder: drag and drop in the review grid, with auto-scroll
-- [ ] **Your test on a real phone** ← next step
+- [x] Reorder (in the review grid, not the editor): drag and drop, with auto-scroll
+- [x] Material 3 pass: full light/dark color schemes (dynamic color on Android 12+), the M3 shape
+      scale for every surface, selected states on secondaryContainer
+- [x] Predictive back: every screen slides right as one card while the gesture is held (up to 90%),
+      the previous screen slides in underneath; release finishes, cancel springs back
 - [ ] Auto filter washes out large dark color blocks (e.g. a card's blue header); use Original for those for now
 - [ ] Pinch-zoom while drawing for precise erasing
 - [ ] Strokes stay put on rotate, but not when the crop changes afterwards
+
+## Phase 2.6: PDF tools ← we are here
+
+Inspired by openpdf's tool set and card layout. All offline: PdfBox-Android (Apache 2.0) for
+operations that must keep text and vectors, Android's PdfRenderer for page rendering.
+
+- [x] Home is now the tools hub (cards); the PDF list moved to a new **Files** tab (3 tabs: Home, Files, Shelf)
+- [x] Edit PDF: open any PDF (picker or Files ⋯ menu) in the scan editor; save over the original or as a copy
+- [x] Compress: shrinks images to a target DPI (presets + custom), keeps text; never makes a file bigger
+- [x] PDF to images: JPG/PNG at 72/150/300 dpi, one folder per PDF
+- [x] Merge: any number of PDFs, reorderable, content preserved
+- [x] Split: every page, or ranges like "1-3, 5, 8-"; outputs in their own folder
+- [x] Images to PDF: gallery photos straight into the editor
+- [x] Shelf shows image files with thumbnails; Files ⋯ menu has Edit / Compress / Convert / Split
+- [x] Predictive back zooms out to 90% while sliding
+- [ ] **Your test on a real phone** ← next step
+- [ ] Editing a text-based PDF turns its pages into images (text stops being selectable) — keep text layers when only pages are reordered/deleted
+- [ ] Password-protected PDFs (needs BouncyCastle, left out to save size)
+- [ ] Faster cold start: profile first composition, Baseline Profiles
 
 ## Phase 3: Scan quality
 

@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.dock.scanner.DockApp
 import com.dock.scanner.data.storage.DockLibrary
 import com.dock.scanner.data.storage.LibraryItem
+import com.dock.scanner.ui.components.MainTab
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.Channel
@@ -64,6 +65,16 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** Selected bottom tab; lives here so tools can send the user to a result in the Shelf. */
+    val tab = MutableStateFlow(MainTab.Home)
+
+    /** Opens [folder] on the Shelf tab. */
+    fun showInShelf(folder: LibraryItem) {
+        _shelfPath.value = listOf(folder)
+        tab.value = MainTab.Shelf
+        refresh()
+    }
 
     private val _messages = Channel<String>(Channel.BUFFERED)
     val messages = _messages.receiveAsFlow()

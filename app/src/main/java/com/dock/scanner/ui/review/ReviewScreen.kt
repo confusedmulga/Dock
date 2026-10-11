@@ -1,5 +1,6 @@
 package com.dock.scanner.ui.review
 
+import androidx.compose.foundation.shape.CircleShape
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -33,7 +34,6 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -45,6 +45,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -112,6 +113,7 @@ fun ReviewScreen(
     val pagesById = remember(all) { all.associateBy { it.id } }
     val saving by scanVm.exporting.collectAsStateWithLifecycle()
     val reordering by scanVm.reorderMode.collectAsStateWithLifecycle()
+    val editing by scanVm.editTarget.collectAsStateWithLifecycle()
     val destinations by libraryVm.destinations.collectAsStateWithLifecycle()
     val root by libraryVm.root.collectAsStateWithLifecycle()
     var confirmDiscard by remember { mutableStateOf(false) }
@@ -233,7 +235,11 @@ fun ReviewScreen(
                         }
                     }
                     LargeTitle(
-                        if (reordering) "Reorder pages" else "New scan",
+                        when {
+                            reordering -> "Reorder pages"
+                            editing != null -> editing!!.name
+                            else -> "New scan"
+                        },
                         subtitle = when {
                             reordering -> "Drag pages into the order you want"
                             pages.isEmpty() -> null
@@ -300,17 +306,24 @@ fun ReviewScreen(
     }
 
     if (saveSheet && root != null) {
+        val original = editing?.item
         SaveSheet(
-            suggestedName = remember { scanVm.suggestedFileName() },
+            suggestedName = remember { editing?.name ?: scanVm.suggestedFileName() },
             destinations = destinations,
             preselected = scanVm.targetFolderId,
+            canReplace = original != null,
             onDismiss = { saveSheet = false },
-            onSave = { name, destination ->
+            onSave = { name, destination, replace ->
                 saveSheet = false
-                scanVm.saveToLibrary(libraryVm.library, root!!, destination.documentId, name) {
-                    android.widget.Toast.makeText(context, "Saved to ${destination.name}", android.widget.Toast.LENGTH_SHORT).show()
+                val done = { where: String ->
+                    android.widget.Toast.makeText(context, where, android.widget.Toast.LENGTH_SHORT).show()
                     libraryVm.refresh()
                     onFinished()
+                }
+                if (replace && original != null) {
+                    scanVm.saveOverOriginal(libraryVm.library, original, name) { done("Saved “$it”") }
+                } else {
+                    scanVm.saveToLibrary(libraryVm.library, root!!, destination.documentId, name) { done("Saved to ${destination.name}") }
                 }
             },
         )
@@ -319,8 +332,13 @@ fun ReviewScreen(
     if (confirmDiscard) {
         AlertDialog(
             onDismissRequest = { confirmDiscard = false },
-            title = { Text("Discard this scan?") },
-            text = { Text("${if (all.size == 1) "The page" else "The ${all.size} pages"} you scanned will be deleted. Nothing has been saved yet.") },
+            title = { Text(if (editing != null) "Discard changes?" else "Discard this scan?") },
+            text = {
+                Text(
+                    if (editing != null) "Your changes to “${editing!!.name}” will be lost. The original PDF isn't touched."
+                    else "${if (all.size == 1) "The page" else "The ${all.size} pages"} you scanned will be deleted. Nothing has been saved yet.",
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     confirmDiscard = false
@@ -342,7 +360,7 @@ private fun SaveCapsule(enabled: Boolean, busy: Boolean, onClick: () -> Unit, la
     Surface(
         color = MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) 1f else 0.4f),
         contentColor = MaterialTheme.colorScheme.onPrimary,
-        shape = RoundedCornerShape(30.dp),
+        shape = CircleShape,
         shadowElevation = 10.dp,
         modifier = Modifier
             .graphicsLayer {
@@ -350,7 +368,7 @@ private fun SaveCapsule(enabled: Boolean, busy: Boolean, onClick: () -> Unit, la
                 scaleY = scale
             }
             .height(60.dp)
-            .clip(RoundedCornerShape(30.dp))
+            .clip(CircleShape)
             .clickable(interaction, indication = null, enabled = enabled, role = Role.Button, onClick = onClick),
     ) {
         Row(Modifier.padding(horizontal = 26.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -369,10 +387,12 @@ private fun SaveSheet(
     suggestedName: String,
     destinations: List<Destination>,
     preselected: String?,
+    canReplace: Boolean,
     onDismiss: () -> Unit,
-    onSave: (String, Destination) -> Unit,
+    onSave: (String, Destination, Boolean) -> Unit,
 ) {
     var name by remember { mutableStateOf(suggestedName) }
+    var replace by remember { mutableStateOf(canReplace) }
     var target by remember(destinations) {
         mutableStateOf(destinations.firstOrNull { it.documentId == preselected } ?: destinations.firstOrNull())
     }
@@ -390,22 +410,41 @@ private fun SaveSheet(
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                 modifier = Modifier.fillMaxWidth(),
             )
-            Spacer(Modifier.height(18.dp))
-            Text("Save to", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(6.dp))
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                destinations.forEachIndexed { i, destination ->
-                    FilterChip(
-                        selected = destination == target,
-                        onClick = { target = destination },
-                        label = { Text(if (i == 0) "${destination.name} (main)" else destination.name) },
-                        leadingIcon = { Icon(painterResource(R.drawable.ic_folder), contentDescription = null, modifier = Modifier.size(18.dp)) },
-                    )
+            if (canReplace) {
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).clickable { replace = !replace }.padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Replace original", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            if (replace) "Overwrites the PDF you opened" else "Saves a new PDF and keeps the original",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = replace, onCheckedChange = { replace = it })
+                }
+            }
+            if (!replace) {
+                Spacer(Modifier.height(18.dp))
+                Text("Save to", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(6.dp))
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    destinations.forEachIndexed { i, destination ->
+                        FilterChip(
+                            selected = destination == target,
+                            onClick = { target = destination },
+                            label = { Text(if (i == 0) "${destination.name} (main)" else destination.name) },
+                            leadingIcon = { Icon(painterResource(R.drawable.ic_folder), contentDescription = null, modifier = Modifier.size(18.dp)) },
+                        )
+                    }
                 }
             }
             Spacer(Modifier.height(24.dp))
             Button(
-                onClick = { onSave(name.trim(), target!!) },
+                onClick = { onSave(name.trim(), target!!, replace) },
                 enabled = valid,
                 modifier = Modifier.fillMaxWidth().height(52.dp),
             ) { Text("Save") }
@@ -422,7 +461,7 @@ private fun PageCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val shape = RoundedCornerShape(14.dp)
+    val shape = MaterialTheme.shapes.large
     Box(
         modifier
             .padding(6.dp)
@@ -449,7 +488,7 @@ private fun PageCard(
             CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.5.dp)
         }
         Surface(
-            shape = RoundedCornerShape(50),
+            shape = CircleShape,
             color = MaterialTheme.colorScheme.inverseSurface.copy(alpha = 0.75f),
             contentColor = MaterialTheme.colorScheme.inverseOnSurface,
             modifier = Modifier.align(Alignment.BottomStart),

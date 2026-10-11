@@ -1,5 +1,6 @@
 package com.dock.scanner.ui.shelf
 
+import androidx.compose.foundation.shape.CircleShape
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -17,7 +18,6 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.Delete
@@ -84,7 +84,7 @@ fun ShelfScreen(
                     Row(
                         Modifier
                             .padding(start = 8.dp, top = 4.dp)
-                            .clip(RoundedCornerShape(20.dp))
+                            .clip(CircleShape)
                             .clickable(onClickLabel = "Back to $parentName") { vm.closeFolder() }
                             .padding(end = 12.dp, top = 6.dp, bottom = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -104,7 +104,7 @@ fun ShelfScreen(
                     subtitle = when {
                         current == null -> vm.rootLabel()
                         folders.isEmpty() && files.isEmpty() -> null
-                        else -> countLabel(folders.size, files.size)
+                        else -> countLabel(folders.size, files.count { it.isPdf }, files.count { it.isImage })
                     },
                 ) {
                     ChromeButton(
@@ -164,7 +164,14 @@ fun ShelfScreen(
                 }
                 if (files.isNotEmpty()) {
                     item(key = "files-title") {
-                        SectionHeader(if (current == null) "Not in a folder" else "PDFs")
+                        SectionHeader(
+                            when {
+                                current == null -> "Not in a folder"
+                                files.all { it.isImage } -> "Images"
+                                files.all { it.isPdf } -> "PDFs"
+                                else -> "Files"
+                            },
+                        )
                     }
                     items(files, key = { it.documentId }) {
                         PdfRow(it, actions, showFolder = false)
@@ -184,7 +191,7 @@ private fun FolderTile(
     modifier: Modifier = Modifier,
 ) {
     var menu by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(18.dp)
+    val shape = MaterialTheme.shapes.large
     Box(modifier.padding(6.dp)) {
         Column(
             Modifier
@@ -236,7 +243,8 @@ private fun FolderTile(
     }
 }
 
-private fun countLabel(folders: Int, files: Int): String = buildList {
+private fun countLabel(folders: Int, pdfs: Int, images: Int): String = buildList {
     if (folders > 0) add(if (folders == 1) "1 folder" else "$folders folders")
-    add(if (files == 1) "1 PDF" else "$files PDFs")
+    if (pdfs > 0 || images == 0) add(if (pdfs == 1) "1 PDF" else "$pdfs PDFs")
+    if (images > 0) add(if (images == 1) "1 image" else "$images images")
 }.joinToString(" · ")

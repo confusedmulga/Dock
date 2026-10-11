@@ -23,8 +23,14 @@ data class LibraryItem(
     val folderName: String? = null,
     /** Number of entries, for folders. */
     val childCount: Int = 0,
+    val mimeType: String = "",
 ) {
-    val displayName: String get() = if (isFolder) name else name.removeSuffix(".pdf").removeSuffix(".PDF")
+    val isPdf: Boolean get() = !isFolder && (mimeType == DockLibrary.MIME_PDF || name.endsWith(".pdf", ignoreCase = true))
+    val isImage: Boolean get() = !isFolder && mimeType.startsWith("image/")
+
+    /** Name without the file extension. */
+    val displayName: String get() = if (isFolder) name else name.substringBeforeLast('.', name)
+    val extension: String get() = if (isFolder || '.' !in name) "" else name.substringAfterLast('.')
 }
 
 /**
@@ -71,7 +77,7 @@ class DockLibrary(context: Context) {
     fun list(root: Uri, parentId: String): List<LibraryItem> {
         val children = DocumentsContract.buildChildDocumentsUriUsingTree(root, parentId)
         return query(children, root, parentId)
-            .filter { it.isFolder || it.isPdf() }
+            .filter { it.isFolder || it.isPdf || it.isImage }
             .map { if (it.isFolder) it.copy(childCount = countChildren(root, it.documentId)) else it }
             .sortedWith(compareByDescending<LibraryItem> { it.isFolder }.thenBy { if (it.isFolder) it.name.lowercase() else "" }
                 .thenByDescending { it.lastModified })
@@ -85,7 +91,7 @@ class DockLibrary(context: Context) {
             for (child in children) {
                 when {
                     child.isFolder && depth < maxDepth -> walk(child.documentId, child.name, depth + 1)
-                    child.isPdf() -> result += child.copy(folderName = folderName)
+                    child.isPdf -> result += child.copy(folderName = folderName)
                 }
             }
         }
@@ -96,14 +102,24 @@ class DockLibrary(context: Context) {
     fun createFolder(root: Uri, parentId: String, name: String): Uri? =
         DocumentsContract.createDocument(resolver, documentUri(root, parentId), Document.MIME_TYPE_DIR, name.trim())
 
+    /** Creates an empty file; the provider adds " (1)" etc. if the name is taken. */
+    fun createFile(root: Uri, parentId: String, mimeType: String, name: String): Uri? =
+        DocumentsContract.createDocument(resolver, documentUri(root, parentId), mimeType, name.trim())
+
+    /** The document ID of something created in the library, e.g. to save into a new folder. */
+    fun idOf(uri: Uri): String = DocumentsContract.getDocumentId(uri)
+
     /** Creates an empty PDF; the provider adds " (1)" etc. if the name is taken. */
     fun createPdf(root: Uri, parentId: String, name: String): Uri? {
         val fileName = name.trim().removeSuffix(".pdf") + ".pdf"
         return DocumentsContract.createDocument(resolver, documentUri(root, parentId), MIME_PDF, fileName)
     }
 
+    /** Renames, keeping the file's extension. */
     fun rename(item: LibraryItem, newName: String): Uri? {
-        val name = if (item.isFolder) newName.trim() else newName.trim().removeSuffix(".pdf") + ".pdf"
+        val ext = item.extension
+        val base = newName.trim().let { if (ext.isNotEmpty()) it.removeSuffix(".$ext") else it }
+        val name = if (ext.isEmpty()) base else "$base.$ext"
         return DocumentsContract.renameDocument(resolver, item.uri, name)
     }
 
@@ -140,6 +156,7 @@ class DockLibrary(context: Context) {
                     parentId = parentId,
                     name = name,
                     isFolder = c.getString(2) == Document.MIME_TYPE_DIR,
+                    mimeType = c.getString(2).orEmpty(),
                     lastModified = if (c.isNull(3)) 0 else c.getLong(3),
                     size = if (c.isNull(4)) 0 else c.getLong(4),
                 )
@@ -147,8 +164,6 @@ class DockLibrary(context: Context) {
         }
         return items
     }
-
-    private fun LibraryItem.isPdf() = !isFolder && name.endsWith(".pdf", ignoreCase = true)
 
     companion object {
         const val MIME_PDF = "application/pdf"
