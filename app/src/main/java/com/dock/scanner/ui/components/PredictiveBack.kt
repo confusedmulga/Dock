@@ -31,8 +31,8 @@ private const val SCREEN_MS = 380
 /** While the back gesture is held, the screen follows the finger but never leaves more than this. */
 private const val MAX_HELD_OFFSET = 0.9f
 
-/** How much the screen zooms out over that distance (Material's predictive back uses 90%). */
-private const val MAX_SHRINK = 0.1f
+/** How much the screen zooms out over that distance: down to 75% of its size. */
+private const val MAX_SHRINK = 0.25f
 
 /** Material's emphasized decelerate: quick start, gentle landing. */
 private val EmphasizedDecelerate = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
@@ -95,7 +95,7 @@ fun AnimatedContentScope.BackSwipe(nav: NavController, entry: NavBackStackEntry,
                     else -> 0f // a new screen is opening on top; the push exit handles this one
                 }
                 translationX = offset * size.width
-                // Shrinks a little as it slides: 100% at rest, 90% once it's 90% across.
+                // Shrinks as it slides: 100% at rest, 75% once it's 90% across.
                 val scale = 1f - MAX_SHRINK * (offset / MAX_HELD_OFFSET).coerceAtMost(1f)
                 scaleX = scale
                 scaleY = scale

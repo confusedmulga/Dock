@@ -130,6 +130,10 @@ class DockLibrary(context: Context) {
 
     fun documentUri(root: Uri, documentId: String): Uri = DocumentsContract.buildDocumentUriUsingTree(root, documentId)
 
+    /** Fresh details of one file or folder, e.g. after it was renamed or moved. */
+    fun itemFor(root: Uri, documentId: String, parentId: String): LibraryItem? =
+        query(documentUri(root, documentId), root, parentId).firstOrNull()
+
     private fun countChildren(root: Uri, folderId: String): Int =
         resolver.query(
             DocumentsContract.buildChildDocumentsUriUsingTree(root, folderId),

@@ -15,6 +15,7 @@ import androidx.navigation.navArgument
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.dock.scanner.ui.camera.CameraScreen
+import com.dock.scanner.ui.tools.PdfTool
 import com.dock.scanner.ui.tools.ToolScreen
 import com.dock.scanner.ui.tools.ToolsViewModel
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -36,11 +37,10 @@ private object Routes {
     const val CAMERA = "camera?retake={retake}"
     const val REVIEW = "review"
     const val PAGE = "page/{id}"
-    const val VIEWER = "viewer/{uri}/{name}"
+    const val VIEWER = "viewer"
     const val TOOL = "tool"
     fun camera(retakePageId: String? = null) = if (retakePageId == null) "camera" else "camera?retake=$retakePageId"
     fun page(id: String) = "page/$id"
-    fun viewer(uri: Uri, name: String) = "viewer/${Uri.encode(uri.toString())}/${Uri.encode(name)}"
 }
 
 @Composable
@@ -114,7 +114,10 @@ fun DockNavHost() {
                         scanVm.targetFolderId = folderId
                         nav.navigate(Routes.camera())
                     },
-                    onOpenPdf = { nav.navigate(Routes.viewer(it.uri, it.displayName)) },
+                    onOpenPdf = {
+                        libraryVm.view(it)
+                        nav.navigate(Routes.VIEWER)
+                    },
                     onEditPdf = { uri, item ->
                         scanVm.targetFolderId = item?.parentId
                         scanVm.openPdf(uri, item) { nav.navigate(Routes.REVIEW) }
@@ -179,7 +182,10 @@ fun DockNavHost() {
                     vm = toolsVm,
                     initialUri = { libraryVm.root.value?.let { libraryVm.library.documentUri(it, libraryVm.library.rootId(it)) } },
                     onBack = { nav.popBackStack() },
-                    onOpenPdf = { nav.navigate(Routes.viewer(it.uri, it.displayName)) },
+                    onOpenPdf = {
+                        libraryVm.view(it)
+                        nav.navigate(Routes.VIEWER)
+                    },
                     onShowInShelf = { folder ->
                         libraryVm.showInShelf(folder)
                         nav.popBackStack(Routes.MAIN, inclusive = false)
@@ -190,9 +196,16 @@ fun DockNavHost() {
         composable(Routes.VIEWER) { entry ->
             BackSwipe(nav, entry) {
                 PdfViewerScreen(
-                    uri = Uri.parse(entry.arguments?.getString("uri").orEmpty()),
-                    name = entry.arguments?.getString("name").orEmpty(),
+                    vm = libraryVm,
                     onBack = { nav.popBackStack() },
+                    onEdit = { item ->
+                        scanVm.targetFolderId = item.parentId
+                        scanVm.openPdf(item.uri, item) { nav.navigate(Routes.REVIEW) }
+                    },
+                    onCompress = { item ->
+                        toolsVm.start(PdfTool.Compress, item)
+                        nav.navigate(Routes.TOOL)
+                    },
                 )
             }
         }

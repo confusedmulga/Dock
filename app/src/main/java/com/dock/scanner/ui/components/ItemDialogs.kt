@@ -43,6 +43,8 @@ class ItemDialogState {
     var moving by mutableStateOf<LibraryItem?>(null)
     var deleting by mutableStateOf<LibraryItem?>(null)
     var creatingFolder by mutableStateOf(false)
+    /** Creating a folder from the move dialog, to move this item straight into it. */
+    var movingToNewFolder by mutableStateOf<LibraryItem?>(null)
 }
 
 @Composable
@@ -68,32 +70,56 @@ fun ItemDialogs(state: ItemDialogState, vm: LibraryViewModel, destinations: List
             onDismiss = { state.creatingFolder = false },
         )
     }
+    state.movingToNewFolder?.let { item ->
+        NameDialog(
+            title = "New folder",
+            initial = "",
+            confirm = "Create and move",
+            onConfirm = { vm.moveToNewFolder(item, it); state.movingToNewFolder = null },
+            onDismiss = { state.movingToNewFolder = null },
+        )
+    }
     state.moving?.let { item ->
         val targets = destinations.filter { it.documentId != item.parentId && it.documentId != item.documentId }
         AlertDialog(
             onDismissRequest = { state.moving = null },
             title = { Text("Move “${item.displayName}”") },
             text = {
-                if (targets.isEmpty()) {
-                    Text("Create a folder on the Shelf first, then move PDFs into it.")
-                } else {
-                    Column {
-                        targets.forEach { target ->
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .clickable { vm.move(item, target); state.moving = null }
-                                    .padding(vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Icon(
-                                    painterResource(R.drawable.ic_folder),
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(22.dp),
-                                )
-                                Text(target.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(start = 14.dp))
-                            }
+                Column {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { state.movingToNewFolder = item; state.moving = null }
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            painterResource(R.drawable.ic_folder_add),
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(22.dp),
+                        )
+                        Text("New folder…", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(start = 14.dp))
+                    }
+                    targets.forEach { target ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable { vm.move(item, target); state.moving = null }
+                                .padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                painterResource(R.drawable.ic_folder),
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(22.dp),
+                            )
+                            Text(
+                                if (target == destinations.firstOrNull()) "${target.name} (main)" else target.name,
+                                style = MaterialTheme.typography.bodyLarge,
+                                modifier = Modifier.padding(start = 14.dp),
+                            )
                         }
                     }
                 }

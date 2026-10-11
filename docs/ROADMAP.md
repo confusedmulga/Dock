@@ -53,7 +53,6 @@ No database to get out of sync.
 - [ ] Swipe between pages in the editor (the page strip covers switching for now)
 - [ ] Add pages to an existing PDF
 - [ ] Delete with undo instead of a confirmation dialog
-- [ ] Pinch-zoom in the viewer
 - [ ] Move UI strings to `strings.xml` (ready for translations)
 
 ## Phase 2.5: Page editor ✅
@@ -96,7 +95,8 @@ operations that must keep text and vectors, Android's PdfRenderer for page rende
 - [x] Split: every page, or ranges like "1-3, 5, 8-"; outputs in their own folder
 - [x] Images to PDF: gallery photos straight into the editor
 - [x] Shelf shows image files with thumbnails; Files ⋯ menu has Edit / Compress / Convert / Split
-- [x] Predictive back zooms out to 90% while sliding
+- [x] Predictive back zooms out to 75% while sliding
+- [x] Viewer: pinch / double-tap zoom with panning; name dropdown with Rename, folder (shown in blue, tap to change, or create a new one), Edit pages, Compress, Delete
 - [ ] **Your test on a real phone** ← next step
 - [ ] Editing a text-based PDF turns its pages into images (text stops being selectable) — keep text layers when only pages are reordered/deleted
 - [ ] Password-protected PDFs (needs BouncyCastle, left out to save size)

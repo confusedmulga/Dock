@@ -79,6 +79,34 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     private val _messages = Channel<String>(Channel.BUFFERED)
     val messages = _messages.receiveAsFlow()
 
+    /**
+     * The PDF open in the viewer. Kept up to date when it's renamed or moved (both give it a new
+     * URI); becomes null when it's deleted.
+     */
+    private val _viewing = MutableStateFlow<LibraryItem?>(null)
+    val viewing: StateFlow<LibraryItem?> = _viewing.asStateFlow()
+
+    fun view(item: LibraryItem) {
+        _viewing.value = item
+        viewModelScope.launch { _viewing.value = withFolderName(item) }
+    }
+
+    /** Fills in the name of the folder the item is in (null when it's directly in the Dock folder). */
+    private suspend fun withFolderName(item: LibraryItem): LibraryItem {
+        val root = _root.value ?: return item
+        if (item.parentId == library.rootId(root)) return item.copy(folderName = null)
+        val name = destinations.value.firstOrNull { it.documentId == item.parentId }?.name
+            ?: withContext(Dispatchers.IO) { runCatching { library.itemFor(root, item.parentId, "")?.name }.getOrNull() }
+        return item.copy(folderName = name)
+    }
+
+    /** After a rename or move: re-read the item under its new URI if it's the one being viewed. */
+    private suspend fun followViewed(old: LibraryItem, root: Uri, newUri: Uri, parentId: String) {
+        if (_viewing.value?.documentId != old.documentId) return
+        val fresh = library.itemFor(root, library.idOf(newUri), parentId) ?: return
+        _viewing.value = withFolderName(fresh)
+    }
+
     /** Folder currently open on the Shelf, used as the default target for a new scan. */
     val currentFolderId: String? get() = _shelfPath.value.lastOrNull()?.documentId
 
@@ -114,20 +142,32 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
         library.createFolder(root, parent, name) ?: error("create failed")
     }
 
-    fun rename(item: LibraryItem, name: String) = mutate("Couldn't rename") {
-        library.rename(item, name) ?: error("rename failed")
+    fun rename(item: LibraryItem, name: String) = mutate("Couldn't rename") { root ->
+        val uri = library.rename(item, name) ?: error("rename failed")
         stepOutOf(item)
+        followViewed(item, root, uri, item.parentId)
     }
 
     fun move(item: LibraryItem, target: Destination) = mutate("Couldn't move") { root ->
-        library.move(root, item, target.documentId) ?: error("move failed")
+        val uri = library.move(root, item, target.documentId) ?: error("move failed")
         stepOutOf(item)
+        followViewed(item, root, uri, target.documentId)
         _messages.trySend("Moved to ${target.name}")
+    }
+
+    /** Creates a folder in the Dock folder and moves [item] into it. */
+    fun moveToNewFolder(item: LibraryItem, folderName: String) = mutate("Couldn't create the folder") { root ->
+        val folderUri = library.createFolder(root, library.rootId(root), folderName) ?: error("create failed")
+        val folderId = library.idOf(folderUri)
+        val uri = library.move(root, item, folderId) ?: error("move failed")
+        followViewed(item, root, uri, folderId)
+        _messages.trySend("Moved to $folderName")
     }
 
     fun delete(item: LibraryItem) = mutate("Couldn't delete") {
         if (!library.delete(item)) error("delete failed")
         stepOutOf(item)
+        if (_viewing.value?.documentId == item.documentId) _viewing.value = null
     }
 
     /** A folder open on the Shelf that was renamed, moved or deleted no longer exists under its old ID. */
