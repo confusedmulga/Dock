@@ -1,0 +1,112 @@
+package com.dock.scanner.core
+
+import androidx.exifinterface.media.ExifInterface
+import org.opencv.android.OpenCVLoader
+import org.opencv.core.Mat
+import org.opencv.core.MatOfInt
+import org.opencv.core.MatOfPoint2f
+import org.opencv.core.Point
+import org.opencv.core.Size
+import org.opencv.imgcodecs.Imgcodecs
+import org.opencv.imgproc.Imgproc
+import java.io.File
+import java.io.IOException
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
+
+/** Turns a captured photo into a finished page image: crop + perspective fix, filter, rotate. */
+object PageProcessor {
+
+    private const val EDGE_TRIM = 0.004
+
+    /** Must be called once before any OpenCV use (e.g. in Application.onCreate). */
+    fun initOpenCv(): Boolean = OpenCVLoader.initLocal()
+
+    /** Upright pixel size of a JPEG, honouring its EXIF orientation. */
+    fun uprightSize(file: File): Pair<Int, Int> {
+        val exif = ExifInterface(file)
+        val w = exif.getAttributeInt(ExifInterface.TAG_IMAGE_WIDTH, 0)
+        val h = exif.getAttributeInt(ExifInterface.TAG_IMAGE_LENGTH, 0)
+        val (width, height) = if (w > 0 && h > 0) w to h else {
+            val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeFile(file.absolutePath, opts)
+            opts.outWidth to opts.outHeight
+        }
+        return if (exif.rotationDegrees % 180 == 0) width to height else height to width
+    }
+
+    /** Auto-detects the document in a photo file. Decodes at 1/4 resolution, so it is fast. */
+    fun detect(file: File, detector: DocumentDetector): Quad? {
+        val gray = loadUpright(file, Imgcodecs.IMREAD_REDUCED_GRAYSCALE_4)
+        try {
+            return detector.detect(gray)
+        } finally {
+            gray.release()
+        }
+    }
+
+    fun process(
+        source: File,
+        quad: Quad,
+        filter: PageFilter,
+        rotation: Int,
+        output: File,
+        maxSide: Int = 2480,
+        jpegQuality: Int = 85,
+    ) {
+        val src = loadUpright(source, Imgcodecs.IMREAD_COLOR)
+        val warped = warp(src, quad, maxSide)
+        src.release()
+        val filtered = ImageFilters.apply(warped, filter)
+        warped.release()
+        val rotated = Mat()
+        DocumentDetector.rotate(filtered, rotated, rotation)
+        filtered.release()
+
+        // OpenCV picks the encoder from the extension, so the temp name must still end in .jpg.
+        val tmp = File(output.parentFile, "tmp_" + output.name)
+        val ok = Imgcodecs.imwrite(tmp.absolutePath, rotated, MatOfInt(Imgcodecs.IMWRITE_JPEG_QUALITY, jpegQuality))
+        rotated.release()
+        if (!ok || !tmp.renameTo(output)) {
+            tmp.delete()
+            throw IOException("Could not write ${output.name}")
+        }
+    }
+
+    private fun warp(src: Mat, quad: Quad, maxSide: Int): Mat {
+        val w = src.cols()
+        val h = src.rows()
+        val (rawW, rawH) = quad.warpedSize(w, h)
+        val scale = min(1.0, maxSide.toDouble() / max(rawW, rawH))
+        val outW = (rawW * scale).roundToInt().coerceAtLeast(1).toDouble()
+        val outH = (rawH * scale).roundToInt().coerceAtLeast(1).toDouble()
+
+        val srcPts = MatOfPoint2f(*quad.corners.map { Point(it.x * w.toDouble(), it.y * h.toDouble()) }.toTypedArray())
+        // Map the quad slightly beyond the output so the outermost pixels are dropped: a
+        // corner placed a hair off the paper otherwise leaves a dark sliver along the edge.
+        val m = EDGE_TRIM * max(outW, outH)
+        val dstPts = MatOfPoint2f(Point(-m, -m), Point(outW + m, -m), Point(outW + m, outH + m), Point(-m, outH + m))
+        val transform = Imgproc.getPerspectiveTransform(srcPts, dstPts)
+        val out = Mat()
+        Imgproc.warpPerspective(
+            src, out, transform, Size(outW, outH), Imgproc.INTER_CUBIC, org.opencv.core.Core.BORDER_REPLICATE,
+        )
+        srcPts.release()
+        dstPts.release()
+        transform.release()
+        return out
+    }
+
+    /** Decodes ignoring EXIF, then rotates explicitly, so behaviour doesn't depend on the codec build. */
+    private fun loadUpright(file: File, flags: Int): Mat {
+        val raw = Imgcodecs.imread(file.absolutePath, flags or Imgcodecs.IMREAD_IGNORE_ORIENTATION)
+        if (raw.empty()) throw IOException("Cannot decode ${file.name}")
+        val degrees = ExifInterface(file).rotationDegrees
+        if (degrees == 0) return raw
+        val out = Mat()
+        DocumentDetector.rotate(raw, out, degrees)
+        raw.release()
+        return out
+    }
+}
