@@ -46,6 +46,7 @@ object PageProcessor {
         }
     }
 
+    /** Renders the page and returns its pixel size (width to height). */
     fun process(
         source: File,
         quad: Quad,
@@ -54,7 +55,7 @@ object PageProcessor {
         output: File,
         maxSide: Int = 2480,
         jpegQuality: Int = 85,
-    ) {
+    ): Pair<Int, Int> {
         val src = loadUpright(source, Imgcodecs.IMREAD_COLOR)
         val warped = warp(src, quad, maxSide)
         src.release()
@@ -65,6 +66,7 @@ object PageProcessor {
         filtered.release()
 
         // OpenCV picks the encoder from the extension, so the temp name must still end in .jpg.
+        val size = rotated.cols() to rotated.rows()
         val tmp = File(output.parentFile, "tmp_" + output.name)
         val ok = Imgcodecs.imwrite(tmp.absolutePath, rotated, MatOfInt(Imgcodecs.IMWRITE_JPEG_QUALITY, jpegQuality))
         rotated.release()
@@ -72,6 +74,7 @@ object PageProcessor {
             tmp.delete()
             throw IOException("Could not write ${output.name}")
         }
+        return size
     }
 
     private fun warp(src: Mat, quad: Quad, maxSide: Int): Mat {

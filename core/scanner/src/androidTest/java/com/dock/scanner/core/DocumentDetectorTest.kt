@@ -84,6 +84,18 @@ class DocumentDetectorTest {
     }
 
     @Test
+    fun findsWholeCardWithDarkHeader() {
+        // Regression: a card whose dark header blends into the desk, with inner edges joined to its
+        // outline. The detector used to return only the light body below the header.
+        val context = InstrumentationRegistry.getInstrumentation().context
+        val file = File(context.cacheDir, "id_card.jpg")
+        context.assets.open("id_card.jpg").use { input -> file.outputStream().use { input.copyTo(it) } }
+        val quad = PageProcessor.detect(file, DocumentDetector())
+        val expected = listOf(Point(380.0, 900.0), Point(2050.0, 1000.0), Point(1980.0, 2050.0), Point(330.0, 1950.0))
+        assertMatches(expected, 2400, 3200, quad)
+    }
+
+    @Test
     fun returnsNullForEmptyScene() {
         val img = Mat(480, 640, CvType.CV_8UC1, Scalar(90.0))
         assertNull(DocumentDetector().detect(img))

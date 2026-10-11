@@ -57,4 +57,33 @@ class JpegPdfWriterTest {
             assertTrue("object ${i + 1} at $offset", text.startsWith("${i + 1} 0 obj", offset))
         }
     }
+
+    @Test
+    fun placesSeveralImagesOnOneSheet() {
+        val front = tmp.newFile("front.jpg").apply { writeBytes(fakeJpeg(800, 500, 3)) }
+        val back = tmp.newFile("back.jpg").apply { writeBytes(fakeJpeg(800, 500, 1)) }
+        val sheet = JpegPdfWriter.PageSpec(
+            595.28f, 841.89f,
+            listOf(
+                JpegPdfWriter.PlacedImage(front, 100f, 500f, 400f, 250f),
+                JpegPdfWriter.PlacedImage(back, 100f, 150f, 400f, 250f),
+            ),
+        )
+        val out = ByteArrayOutputStream()
+        JpegPdfWriter().writePages(listOf(sheet), out)
+        val text = String(out.toByteArray(), Charsets.ISO_8859_1)
+
+        assertTrue(text.contains("/Count 1"))
+        assertTrue(text.contains("/Im0 6 0 R /Im1 7 0 R"))
+        assertTrue(text.contains("400 0 0 250 100 500 cm\n/Im0 Do"))
+        assertTrue(text.contains("400 0 0 250 100 150 cm\n/Im1 Do"))
+
+        // Every xref entry must point at its object, even though the page tree is written last.
+        val startXref = text.substringAfter("startxref\n").substringBefore("\n").toInt()
+        val entries = text.substring(startXref).lines().drop(3).takeWhile { it.endsWith(" n ") }
+        assertEquals(7, entries.size)
+        entries.forEachIndexed { i, line ->
+            assertTrue("object ${i + 1}", text.startsWith("${i + 1} 0 obj", line.substring(0, 10).toInt()))
+        }
+    }
 }

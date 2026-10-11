@@ -9,7 +9,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
+import androidx.navigation.navArgument
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.dock.scanner.ui.camera.CameraScreen
@@ -23,10 +25,11 @@ private object Routes {
     const val SETUP = "setup"
     const val CHANGE_FOLDER = "change-folder"
     const val MAIN = "main"
-    const val CAMERA = "camera"
+    const val CAMERA = "camera?retake={retake}"
     const val REVIEW = "review"
     const val PAGE = "page/{id}"
     const val VIEWER = "viewer/{uri}/{name}"
+    fun camera(retakePageId: String? = null) = if (retakePageId == null) "camera" else "camera?retake=$retakePageId"
     fun page(id: String) = "page/$id"
     fun viewer(uri: Uri, name: String) = "viewer/${Uri.encode(uri.toString())}/${Uri.encode(name)}"
 }
@@ -72,14 +75,22 @@ fun DockNavHost() {
                 vm = libraryVm,
                 onScan = { folderId ->
                     scanVm.targetFolderId = folderId
-                    nav.navigate(Routes.CAMERA)
+                    nav.navigate(Routes.camera())
                 },
                 onOpenPdf = { nav.navigate(Routes.viewer(it.uri, it.displayName)) },
                 onChangeLocation = { nav.navigate(Routes.CHANGE_FOLDER) },
             )
         }
-        composable(Routes.CAMERA) {
-            CameraScreen(vm = scanVm, onDone = {
+        composable(
+            Routes.CAMERA,
+            arguments = listOf(navArgument("retake") { type = NavType.StringType; nullable = true; defaultValue = null }),
+        ) { entry ->
+            val retake = entry.arguments?.getString("retake")
+            CameraScreen(vm = scanVm, retakePageId = retake, onDone = {
+                if (retake != null) {
+                    nav.popBackStack()
+                    return@CameraScreen
+                }
                 when {
                     // Came from Review to add pages: just go back to it.
                     nav.previousBackStackEntry?.destination?.route == Routes.REVIEW -> nav.popBackStack()
@@ -95,7 +106,7 @@ fun DockNavHost() {
             ReviewScreen(
                 scanVm = scanVm,
                 libraryVm = libraryVm,
-                onAddPages = { nav.navigate(Routes.CAMERA) },
+                onAddPages = { nav.navigate(Routes.camera()) },
                 onOpenPage = { nav.navigate(Routes.page(it)) },
                 onFinished = { nav.popBackStack(Routes.MAIN, inclusive = false) },
             )
@@ -105,6 +116,11 @@ fun DockNavHost() {
                 vm = scanVm,
                 pageId = entry.arguments?.getString("id").orEmpty(),
                 onBack = { nav.popBackStack(Routes.REVIEW, inclusive = false) },
+                onRetake = { nav.navigate(Routes.camera(retakePageId = it)) },
+                onReorder = {
+                    scanVm.reorderMode.value = true
+                    nav.popBackStack(Routes.REVIEW, inclusive = false)
+                },
             )
         }
         composable(Routes.VIEWER) { entry ->

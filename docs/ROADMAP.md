@@ -35,7 +35,7 @@ Every phase runs the same loop:
 - [x] Multi-page session, page grid, delete
 - [x] PDF export (JPEGs embedded as-is, so files stay small)
 
-## Phase 2: Library & navigation ← we are here
+## Phase 2: Library & navigation ✅
 
 The library is plain files: PDFs and folders live in a real folder (Documents/Dock by
 default) granted through the system folder picker, so they're visible in any file manager.
@@ -49,13 +49,35 @@ No database to get out of sync.
 - [x] Review screen: scanned pages + save sheet (name + destination folder)
 - [x] Built-in PDF viewer
 - [x] Design pass with the apple-design skill: large tight titles, springs, glass chrome
-- [ ] **Your test on a real phone** ← next step
 - [ ] Keep an unsaved scan across process death (draft session on disk)
-- [ ] Reorder pages by drag and drop; swipe between pages in the editor
+- [ ] Swipe between pages in the editor
 - [ ] Add pages to an existing PDF
 - [ ] Delete with undo instead of a confirmation dialog
 - [ ] Pinch-zoom in the viewer
 - [ ] Move UI strings to `strings.xml` (ready for translations)
+
+## Phase 2.5: Page editor ← we are here
+
+Two-stage rendering: the expensive OpenCV base (crop, perspective, filter, rotation) only
+re-runs when those change; brightness/contrast and ink are composited on top cheaply and
+previewed live with the same math.
+
+- [x] Toolbar in order: Retake · Crop · Edit text · Filters · Bright · Eraser · Markup · Adjust · Reorder
+- [x] Retake: camera replaces the page's photo, keeping its filter and brightness
+- [x] Crop (with rotate)
+- [x] Edit text: placeholder until OCR (Phase 5)
+- [x] Filters with "Apply to all pages"
+- [x] Bright: brightness + contrast sliders, live preview, "Apply to all pages"
+- [x] Eraser: paint with a color (white by default), eyedropper picks colors from the page, undo
+- [x] Markup: preset colors + full color picker, stroke width and opacity, undo
+- [x] Adjust: A3/A4/A5/Letter/Legal, portrait/landscape; move (drag) and resize (pinch or
+      slider) the page; put several pages on one sheet (e.g. ID card front + back); pages
+      stay on the paper; exported as vectors, no re-rasterizing
+- [x] Reorder: drag and drop in the review grid, with auto-scroll
+- [ ] **Your test on a real phone** ← next step
+- [ ] Auto filter washes out large dark color blocks (e.g. a card's blue header); use Original for those for now
+- [ ] Pinch-zoom while drawing for precise erasing
+- [ ] Strokes stay put on rotate, but not when the crop changes afterwards
 
 ## Phase 3: Scan quality
 

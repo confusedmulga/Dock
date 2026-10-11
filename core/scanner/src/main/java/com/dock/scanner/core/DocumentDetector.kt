@@ -24,6 +24,7 @@ class DocumentDetector(
 ) {
     private val closeKernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(9.0, 9.0))
     private val dilateKernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(3.0, 3.0))
+    private val supportKernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(5.0, 5.0))
 
     /**
      * @param gray single-channel 8-bit image, any size. Not modified.
@@ -57,15 +58,18 @@ class DocumentDetector(
 
     private fun findWithCanny(blurred: Mat): List<Point>? {
         val edges = Mat()
+        val nearEdges = Mat()
         try {
             val median = median(blurred)
             val lower = (0.66 * median).coerceIn(10.0, 120.0)
             val upper = (1.33 * median).coerceIn(lower + 30.0, 255.0)
             Imgproc.Canny(blurred, edges, lower, upper)
             Imgproc.dilate(edges, edges, dilateKernel)
-            return largestQuad(edges, blurred.cols() * blurred.rows(), edgeMap = true)
+            Imgproc.dilate(edges, nearEdges, supportKernel)
+            return largestQuad(edges, blurred.cols() * blurred.rows(), nearEdges)
         } finally {
             edges.release()
+            nearEdges.release()
         }
     }
 
@@ -73,7 +77,7 @@ class DocumentDetector(
         val binary = Mat()
         try {
             Imgproc.threshold(blurred, binary, 0.0, 255.0, Imgproc.THRESH_BINARY or Imgproc.THRESH_OTSU)
-            return largestQuad(binary, blurred.cols() * blurred.rows(), edgeMap = false)
+            return largestQuad(binary, blurred.cols() * blurred.rows(), nearEdges = null)
         } finally {
             binary.release()
         }
@@ -84,7 +88,7 @@ class DocumentDetector(
      * their convex hull, so an outline with gaps (a corner lost in shadow, a finger over an
      * edge) still counts as long as most of it is visible.
      */
-    private fun largestQuad(binary: Mat, imageArea: Int, edgeMap: Boolean): List<Point>? {
+    private fun largestQuad(binary: Mat, imageArea: Int, nearEdges: Mat?): List<Point>? {
         val contours = ArrayList<MatOfPoint>()
         val hierarchy = Mat()
         Imgproc.findContours(binary, contours, hierarchy, Imgproc.RETR_LIST, Imgproc.CHAIN_APPROX_SIMPLE)
@@ -108,7 +112,7 @@ class DocumentDetector(
         var best: List<Point>? = null
         var bestArea = 0.0
         for (candidate in candidates.take(MAX_CANDIDATES)) {
-            val quad = approximateQuad(candidate, minArea, edgeMap) ?: continue
+            val quad = approximateQuad(candidate, minArea, nearEdges) ?: continue
             val area = polygonArea(quad)
             if (area > bestArea) {
                 best = quad
@@ -129,22 +133,42 @@ class DocumentDetector(
         return hull
     }
 
-    private fun approximateQuad(candidate: Candidate, minArea: Double, edgeMap: Boolean): List<Point>? {
-        val hullPerimeter = Imgproc.arcLength(candidate.hull, true)
-        // Edge-map contours are traced along both sides of the line, so a closed outline is about
-        // twice the hull perimeter long. Needing ~60% coverage rejects hulls of random clutter.
-        val curve = MatOfPoint2f(*candidate.points)
-        val coverage = Imgproc.arcLength(curve, true) / ((if (edgeMap) 2 else 1) * hullPerimeter)
-        curve.release()
-        if (coverage < MIN_OUTLINE_COVERAGE) return null
-
+    /**
+     * @param nearEdges slightly widened edge map; when given, most of the quad's border must
+     *   run along real edges, which rejects hulls wrapped around unrelated clutter.
+     */
+    private fun approximateQuad(candidate: Candidate, minArea: Double, nearEdges: Mat?): List<Point>? {
         for (epsilon in doubleArrayOf(0.02, 0.03, 0.045, 0.06)) {
             val quad = polygon(candidate.hull, epsilon) ?: continue
             val area = polygonArea(quad)
             // The quad must describe the hull, not cut big corners off it.
-            return if (area >= minArea && kotlin.math.abs(area - candidate.hullArea) / candidate.hullArea < 0.1) quad else null
+            if (area < minArea || kotlin.math.abs(area - candidate.hullArea) / candidate.hullArea >= 0.1) return null
+            if (nearEdges != null && edgeSupport(quad, nearEdges) < MIN_EDGE_SUPPORT) return null
+            return quad
         }
         return null
+    }
+
+    /** Fraction of points sampled along the quad's border that lie on an edge. */
+    private fun edgeSupport(quad: List<Point>, nearEdges: Mat): Double {
+        val samplesPerSide = 50
+        val pixel = ByteArray(1)
+        var total = 0
+        var hits = 0
+        for (i in quad.indices) {
+            val a = quad[i]
+            val b = quad[(i + 1) % quad.size]
+            for (s in 0 until samplesPerSide) {
+                val t = s.toDouble() / samplesPerSide
+                val x = (a.x + (b.x - a.x) * t).toInt()
+                val y = (a.y + (b.y - a.y) * t).toInt()
+                if (x < 0 || y < 0 || x >= nearEdges.cols() || y >= nearEdges.rows()) continue
+                total++
+                nearEdges.get(y, x, pixel)
+                if (pixel[0].toInt() != 0) hits++
+            }
+        }
+        return if (total == 0) 0.0 else hits.toDouble() / total
     }
 
     private fun polygon(curve: MatOfPoint2f, epsilonFraction: Double): List<Point>? {
@@ -189,7 +213,7 @@ class DocumentDetector(
 
     companion object {
         private const val MAX_CANDIDATES = 8
-        private const val MIN_OUTLINE_COVERAGE = 0.6
+        private const val MIN_EDGE_SUPPORT = 0.6
 
         fun rotate(src: Mat, dst: Mat, degrees: Int) {
             when (((degrees % 360) + 360) % 360) {

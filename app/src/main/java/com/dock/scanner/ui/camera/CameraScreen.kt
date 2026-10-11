@@ -79,8 +79,12 @@ import com.dock.scanner.ui.components.drawQuad
 import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
 
+/**
+ * @param retakePageId when set, the camera takes a single photo that replaces this page,
+ *   then closes; gallery import and the page counter are hidden.
+ */
 @Composable
-fun CameraScreen(vm: ScanViewModel, onDone: () -> Unit, onImported: () -> Unit) {
+fun CameraScreen(vm: ScanViewModel, onDone: () -> Unit, onImported: () -> Unit, retakePageId: String? = null) {
     val context = LocalContext.current
     var granted by remember {
         mutableStateOf(
@@ -91,7 +95,7 @@ fun CameraScreen(vm: ScanViewModel, onDone: () -> Unit, onImported: () -> Unit) 
     LaunchedEffect(Unit) { if (!granted) request.launch(Manifest.permission.CAMERA) }
 
     if (granted) {
-        CameraContent(vm, onDone, onImported)
+        CameraContent(vm, onDone, onImported, retakePageId)
     } else {
         Column(
             Modifier.fillMaxSize().systemBarsPadding().padding(32.dp),
@@ -111,7 +115,7 @@ fun CameraScreen(vm: ScanViewModel, onDone: () -> Unit, onImported: () -> Unit) 
 }
 
 @Composable
-private fun CameraContent(vm: ScanViewModel, onDone: () -> Unit, onImported: () -> Unit) {
+private fun CameraContent(vm: ScanViewModel, onDone: () -> Unit, onImported: () -> Unit, retakePageId: String?) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val haptics = LocalHapticFeedback.current
@@ -179,7 +183,12 @@ private fun CameraContent(vm: ScanViewModel, onDone: () -> Unit, onImported: () 
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
                     capturing = false
-                    vm.addPhoto(file)
+                    if (retakePageId != null) {
+                        vm.retakePhoto(retakePageId, file)
+                        onDone()
+                    } else {
+                        vm.addPhoto(file)
+                    }
                 }
 
                 override fun onError(exception: ImageCaptureException) {
@@ -236,7 +245,11 @@ private fun CameraContent(vm: ScanViewModel, onDone: () -> Unit, onImported: () 
                 }
                 Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = flash.value)))
                 Text(
-                    if (liveQuad == null) "Point the camera at a document" else "Document found",
+                    when {
+                        retakePageId != null && liveQuad == null -> "Retake: point the camera at the page"
+                        liveQuad == null -> "Point the camera at a document"
+                        else -> "Document found"
+                    },
                     color = Color.White,
                     style = MaterialTheme.typography.labelLarge,
                     modifier = Modifier
@@ -253,13 +266,17 @@ private fun CameraContent(vm: ScanViewModel, onDone: () -> Unit, onImported: () 
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            IconButton(
-                onClick = {
-                    pickImages.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                },
-                modifier = Modifier.size(56.dp),
-            ) {
-                Icon(painterResource(R.drawable.ic_gallery), contentDescription = "Import from gallery", tint = Color.White)
+            if (retakePageId == null) {
+                IconButton(
+                    onClick = {
+                        pickImages.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    },
+                    modifier = Modifier.size(56.dp),
+                ) {
+                    Icon(painterResource(R.drawable.ic_gallery), contentDescription = "Import from gallery", tint = Color.White)
+                }
+            } else {
+                Spacer(Modifier.size(56.dp))
             }
 
             Box(
@@ -277,7 +294,7 @@ private fun CameraContent(vm: ScanViewModel, onDone: () -> Unit, onImported: () 
 
             Box(Modifier.size(56.dp), contentAlignment = Alignment.Center) {
                 val last = pages.lastOrNull()
-                if (last != null) {
+                if (last != null && retakePageId == null) {
                     BadgedBox(badge = { Badge { Text("${pages.size}") } }) {
                         AsyncImage(
                             model = last.output ?: last.source,

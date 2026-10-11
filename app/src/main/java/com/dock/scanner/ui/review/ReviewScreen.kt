@@ -63,6 +63,24 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.unit.toSize
+import androidx.compose.ui.zIndex
+import com.dock.scanner.ui.editor.SheetView
+import kotlinx.coroutines.delay
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.dock.scanner.R
@@ -88,8 +106,12 @@ fun ReviewScreen(
     onFinished: () -> Unit,
 ) {
     val context = LocalContext.current
-    val pages by scanVm.pages.collectAsStateWithLifecycle()
+    val haptics = LocalHapticFeedback.current
+    val all by scanVm.pages.collectAsStateWithLifecycle()
+    val pages by scanVm.sheets.collectAsStateWithLifecycle()
+    val pagesById = remember(all) { all.associateBy { it.id } }
     val saving by scanVm.exporting.collectAsStateWithLifecycle()
+    val reordering by scanVm.reorderMode.collectAsStateWithLifecycle()
     val destinations by libraryVm.destinations.collectAsStateWithLifecycle()
     val root by libraryVm.root.collectAsStateWithLifecycle()
     var confirmDiscard by remember { mutableStateOf(false) }
@@ -99,36 +121,155 @@ fun ReviewScreen(
     val pickImages = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(20)) { uris ->
         if (uris.isNotEmpty()) scanVm.importImages(uris)
     }
-    fun leave() = if (pages.isEmpty()) onFinished() else confirmDiscard = true
+    fun leave() = when {
+        reordering -> scanVm.reorderMode.value = false
+        all.isEmpty() -> onFinished()
+        else -> confirmDiscard = true
+    }
     BackHandler { leave() }
+
+    // Drag-and-drop state. Card bounds are recorded in grid coordinates as they're laid out.
+    val gridState = rememberLazyGridState()
+    val bounds = remember { mutableMapOf<String, Rect>() }
+    var dragKey by remember { mutableStateOf<String?>(null) }
+    var dragOffset by remember { mutableStateOf(Offset.Zero) }
+    var pointerY by remember { mutableFloatStateOf(0f) }
+    var gridHeight by remember { mutableFloatStateOf(0f) }
+    /** After a move, wait until the dragged card has been laid out in its new slot. */
+    var awaitingSlot by remember { mutableStateOf<Offset?>(null) }
+    /**
+     * Converts the grid's layout offsets into pointer coordinates. Hit-testing uses layout slots
+     * rather than drawn positions: those include the drag translation and the neighbours'
+     * slide animations, which would make cards swap back and forth.
+     */
+    var slotOrigin by remember { mutableStateOf(Offset.Zero) }
+    fun slot(key: String): Rect? = gridState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == key }?.let {
+        Rect(Offset(it.offset.x.toFloat(), it.offset.y.toFloat()) + slotOrigin, it.size.toSize())
+    }
+
+    // Auto-scroll while a card is held near the top or bottom edge.
+    LaunchedEffect(dragKey) {
+        val edge = 90f * context.resources.displayMetrics.density
+        while (dragKey != null) {
+            val speed = when {
+                pointerY < edge -> -(edge - pointerY) / edge * 18f
+                pointerY > gridHeight - edge -> (pointerY - (gridHeight - edge)) / edge * 18f
+                else -> 0f
+            }
+            if (speed != 0f) {
+                val consumed = gridState.scrollBy(speed)
+                dragOffset += Offset(0f, consumed)
+            }
+            delay(16)
+        }
+    }
 
     val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 100.dp
 
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
         LazyVerticalGrid(
+            state = gridState,
             columns = GridCells.Adaptive(150.dp),
             contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = top, bottom = bottom),
-            modifier = Modifier.fillMaxSize().hazeSource(hazeState),
+            modifier = Modifier
+                .fillMaxSize()
+                .hazeSource(hazeState)
+                .onSizeChanged { gridHeight = it.height.toFloat() }
+                .pointerInput(reordering) {
+                    if (!reordering) return@pointerInput
+                    detectDragGestures(
+                        onDragStart = { pos ->
+                            val hit = bounds.entries.firstOrNull { (key, r) -> key in pagesById && gridState.isVisible(key) && r.contains(pos) }
+                            dragKey = hit?.key
+                            if (hit != null) {
+                                val info = gridState.layoutInfo.visibleItemsInfo.first { it.key == hit.key }
+                                slotOrigin = hit.value.topLeft - Offset(info.offset.x.toFloat(), info.offset.y.toFloat())
+                            }
+                            dragOffset = Offset.Zero
+                            pointerY = pos.y
+                            awaitingSlot = null
+                            if (dragKey != null) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        },
+                        onDrag = { change, amount ->
+                            val key = dragKey ?: return@detectDragGestures
+                            change.consume()
+                            dragOffset += amount
+                            pointerY = change.position.y
+                            val home = slot(key) ?: return@detectDragGestures
+                            awaitingSlot?.let { expected ->
+                                if ((home.topLeft - expected).getDistance() > 2f) return@detectDragGestures
+                                awaitingSlot = null
+                            }
+                            val center = home.center + dragOffset
+                            val target = gridState.layoutInfo.visibleItemsInfo
+                                .mapNotNull { info -> (info.key as? String)?.takeIf { it != key && it in pagesById } }
+                                .firstNotNullOfOrNull { k -> slot(k)?.takeIf { it.contains(center) }?.let { k to it } }
+                            if (target != null) {
+                                // The card jumps into the target's slot; shift the offset so it stays under the finger.
+                                dragOffset += home.topLeft - target.second.topLeft
+                                awaitingSlot = target.second.topLeft
+                                scanVm.moveSheet(key, target.first)
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            }
+                        },
+                        onDragEnd = { dragKey = null; dragOffset = Offset.Zero },
+                        onDragCancel = { dragKey = null; dragOffset = Offset.Zero },
+                    )
+                },
         ) {
-            item(span = { GridItemSpan(maxLineSpan) }) {
+            item(span = { GridItemSpan(maxLineSpan) }, key = "header") {
                 // The grid is inset 14 dp; 6 dp more puts text on the same 20 dp line as other screens.
                 Column {
-                    TextButton(onClick = ::leave, contentPadding = PaddingValues(horizontal = 6.dp)) { Text("Cancel") }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (!reordering) {
+                            TextButton(onClick = ::leave, contentPadding = PaddingValues(horizontal = 6.dp)) { Text("Cancel") }
+                        }
+                        Spacer(Modifier.weight(1f))
+                        if (reordering) {
+                            TextButton(onClick = { scanVm.reorderMode.value = false }) { Text("Done") }
+                        } else if (pages.size > 1) {
+                            TextButton(onClick = { scanVm.reorderMode.value = true }) { Text("Reorder") }
+                        }
+                    }
                     LargeTitle(
-                        "New scan",
-                        subtitle = if (pages.isEmpty()) null else "${pages.size} page${if (pages.size == 1) "" else "s"} · tap a page to crop or change its look",
+                        if (reordering) "Reorder pages" else "New scan",
+                        subtitle = when {
+                            reordering -> "Drag pages into the order you want"
+                            pages.isEmpty() -> null
+                            else -> "${pages.size} page${if (pages.size == 1) "" else "s"} · tap a page to edit it"
+                        },
                         start = 6.dp,
                     )
                 }
             }
             if (pages.isEmpty()) {
-                item(span = { GridItemSpan(maxLineSpan) }) {
+                item(span = { GridItemSpan(maxLineSpan) }, key = "empty") {
                     EmptyMessage("No pages", "Add pages with the camera or from your photos.")
                 }
             }
             itemsIndexed(pages, key = { _, p -> p.id }) { i, page ->
-                PageCard(i + 1, page, onClick = { onOpenPage(page.id) })
+                val dragging = page.id == dragKey
+                PageCard(
+                    number = i + 1,
+                    page = page,
+                    pagesById = pagesById,
+                    reordering = reordering,
+                    onClick = { onOpenPage(page.id) },
+                    modifier = Modifier
+                        .then(if (dragging) Modifier else Modifier.animateItem())
+                        .onGloballyPositioned { bounds[page.id] = Rect(it.positionInParent(), it.size.toSize()) }
+                        .zIndex(if (dragging) 1f else 0f)
+                        .graphicsLayer {
+                            if (dragging) {
+                                translationX = dragOffset.x
+                                translationY = dragOffset.y
+                                scaleX = 1.05f
+                                scaleY = 1.05f
+                                shadowElevation = 24f
+                            }
+                        },
+                )
             }
         }
 
@@ -141,16 +282,20 @@ fun ReviewScreen(
                 .padding(bottom = 18.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            GlassBubble(
-                hazeState,
-                painterResource(R.drawable.ic_gallery),
-                contentDescription = "Add pages from photos",
-                onClick = { pickImages.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-            )
-            Spacer(Modifier.width(10.dp))
-            GlassBubble(hazeState, painterResource(R.drawable.ic_camera), contentDescription = "Add pages with the camera", onClick = onAddPages)
-            Spacer(Modifier.width(10.dp))
-            SaveCapsule(enabled = pages.isNotEmpty() && !saving, busy = saving, onClick = { saveSheet = true })
+            if (reordering) {
+                SaveCapsule(enabled = true, busy = false, label = "Done", onClick = { scanVm.reorderMode.value = false })
+            } else {
+                GlassBubble(
+                    hazeState,
+                    painterResource(R.drawable.ic_gallery),
+                    contentDescription = "Add pages from photos",
+                    onClick = { pickImages.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                )
+                Spacer(Modifier.width(10.dp))
+                GlassBubble(hazeState, painterResource(R.drawable.ic_camera), contentDescription = "Add pages with the camera", onClick = onAddPages)
+                Spacer(Modifier.width(10.dp))
+                SaveCapsule(enabled = pages.isNotEmpty() && !saving, busy = saving, onClick = { saveSheet = true })
+            }
         }
     }
 
@@ -175,7 +320,7 @@ fun ReviewScreen(
         AlertDialog(
             onDismissRequest = { confirmDiscard = false },
             title = { Text("Discard this scan?") },
-            text = { Text("${if (pages.size == 1) "The page" else "The ${pages.size} pages"} you scanned will be deleted. Nothing has been saved yet.") },
+            text = { Text("${if (all.size == 1) "The page" else "The ${all.size} pages"} you scanned will be deleted. Nothing has been saved yet.") },
             confirmButton = {
                 TextButton(onClick = {
                     confirmDiscard = false
@@ -190,7 +335,7 @@ fun ReviewScreen(
 
 /** The one solid, colored control: the primary action stands apart from the glass chrome. */
 @Composable
-private fun SaveCapsule(enabled: Boolean, busy: Boolean, onClick: () -> Unit) {
+private fun SaveCapsule(enabled: Boolean, busy: Boolean, onClick: () -> Unit, label: String = "Save PDF") {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) 0.94f else 1f, DockMotion.press(), label = "saveScale")
@@ -213,7 +358,7 @@ private fun SaveCapsule(enabled: Boolean, busy: Boolean, onClick: () -> Unit) {
                 CircularProgressIndicator(Modifier.size(20.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
                 Spacer(Modifier.width(10.dp))
             }
-            Text(if (busy) "Saving…" else "Save PDF", style = MaterialTheme.typography.labelLarge)
+            Text(if (busy) "Saving…" else label, style = MaterialTheme.typography.labelLarge)
         }
     }
 }
@@ -269,20 +414,30 @@ private fun SaveSheet(
 }
 
 @Composable
-private fun PageCard(number: Int, page: Page, onClick: () -> Unit) {
+private fun PageCard(
+    number: Int,
+    page: Page,
+    pagesById: Map<String, Page>,
+    reordering: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val shape = RoundedCornerShape(14.dp)
     Box(
-        Modifier
+        modifier
             .padding(6.dp)
             .fillMaxWidth()
             .aspectRatio(0.75f)
             .clip(shape)
             .background(MaterialTheme.colorScheme.surfaceContainerLow)
-            .clickable(onClickLabel = "Edit page $number", onClick = onClick)
+            .then(if (reordering) Modifier else Modifier.clickable(onClickLabel = "Edit page $number", onClick = onClick))
             .padding(10.dp),
         contentAlignment = Alignment.Center,
     ) {
-        if (page.output != null) {
+        val layout = page.layout
+        if (layout != null) {
+            SheetView(layout, pagesById)
+        } else if (page.output != null) {
             AsyncImage(
                 model = page.output,
                 contentDescription = "Page $number",
@@ -290,7 +445,9 @@ private fun PageCard(number: Int, page: Page, onClick: () -> Unit) {
                 modifier = Modifier.fillMaxSize(),
             )
         }
-        if (page.processing) CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.5.dp)
+        if (pagesById.values.any { it.processing && (it.id == page.id || it.hostId == page.id) }) {
+            CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.5.dp)
+        }
         Surface(
             shape = RoundedCornerShape(50),
             color = MaterialTheme.colorScheme.inverseSurface.copy(alpha = 0.75f),
@@ -299,5 +456,16 @@ private fun PageCard(number: Int, page: Page, onClick: () -> Unit) {
         ) {
             Text("$number", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 9.dp, vertical = 2.dp))
         }
+        if (reordering) {
+            Icon(
+                painterResource(R.drawable.ic_reorder),
+                contentDescription = "Drag to reorder",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.align(Alignment.TopEnd).size(20.dp),
+            )
+        }
     }
 }
+
+/** Card bounds of items scrolled out of view are stale, so only visible cards take part in drag and drop. */
+private fun LazyGridState.isVisible(key: String) = layoutInfo.visibleItemsInfo.any { it.key == key }
