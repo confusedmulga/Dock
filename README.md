@@ -45,6 +45,10 @@ Min SDK 26 (Android 8.0). The debug APK bundles native code for `arm64-v8a` and 
 
 Kotlin · Jetpack Compose · Material 3 · CameraX · OpenCV · PdfBox-Android · Coil · Haze (backdrop blur) · Navigation Compose
 
+## Privacy
+
+Dock collects no data. See the [privacy policy](PRIVACY.md).
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
