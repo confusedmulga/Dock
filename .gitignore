@@ -10,3 +10,8 @@ build/
 .cxx
 *.apk
 *.aab
+
+# Play upload key: never commit
+keystore.properties
+*.jks
+*.keystore
