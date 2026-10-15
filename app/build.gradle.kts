@@ -48,6 +48,10 @@ android {
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.findByName("release")
+            // Puts native symbols in the bundle for Play Console crash reports, for any library
+            // that ships them. Today's .so files (OpenCV, CameraX, Compose) come pre-stripped, so
+            // nothing is extracted yet and Play's "no debug symbols" notice is expected.
+            ndk { debugSymbolLevel = "SYMBOL_TABLE" }
         }
     }
 
