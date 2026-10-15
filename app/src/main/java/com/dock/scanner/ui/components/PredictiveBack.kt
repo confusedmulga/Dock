@@ -71,9 +71,10 @@ val popExit: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransit
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
 fun AnimatedContentScope.BackSwipe(nav: NavController, entry: NavBackStackEntry, content: @Composable () -> Unit) {
-    val stack by nav.currentBackStack.collectAsStateWithLifecycle()
-    val onTop = stack.lastOrNull()?.id == entry.id
-    val inStack = stack.any { it.id == entry.id }
+    val top by nav.currentBackStackEntryFlow.collectAsStateWithLifecycle(nav.currentBackStackEntry)
+    val onTop = top?.id == entry.id
+    // A screen that's still in the stack while leaving is the one a new screen is opening over.
+    val inStack = onTop || nav.previousBackStackEntry?.id == entry.id
     // Same length and easing as the pop transition, so it reads Navigation's seek position directly.
     val progress = transition.animateFloat(
         transitionSpec = { tween(SCREEN_MS, easing = LinearEasing) },

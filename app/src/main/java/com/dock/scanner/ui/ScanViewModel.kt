@@ -386,6 +386,12 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Crop, rotation and retake change a page's shape: keep every sheet's pages on the paper. */
+    private fun fitSheets(list: List<Page>): List<Page> {
+        val aspects = list.filter { it.outputWidth > 0 && it.outputHeight > 0 }.associate { it.id to it.aspect }
+        return list.map { page -> page.layout?.let { page.copy(layout = it.clampAll(aspects::get)) } ?: page }
+    }
+
     /** Fits every page on the sheet into an even grid of cells. */
     private fun arranged(layout: SheetLayout): SheetLayout {
         val n = layout.items.size
@@ -589,10 +595,14 @@ class ScanViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             result.onSuccess { r ->
-                update(id) {
-                    it.copy(
-                        base = r.base, baseKey = r.baseKey, output = r.output,
-                        outputWidth = r.width, outputHeight = r.height, processing = false,
+                _pages.update { list ->
+                    fitSheets(
+                        list.map {
+                            if (it.id != id) it else it.copy(
+                                base = r.base, baseKey = r.baseKey, output = r.output,
+                                outputWidth = r.width, outputHeight = r.height, processing = false,
+                            )
+                        },
                     )
                 }
                 listOfNotNull(current.base, current.output)

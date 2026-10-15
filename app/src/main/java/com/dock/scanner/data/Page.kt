@@ -95,6 +95,10 @@ data class SheetLayout(val paper: Paper, val landscape: Boolean, val items: List
         )
     }
 
+    /** Clamps every placement again after pages changed shape; [aspectOf] is null for a page whose shape isn't known yet. */
+    fun clampAll(aspectOf: (String) -> Float?): SheetLayout =
+        copy(items = items.map { p -> aspectOf(p.pageId)?.let { clamp(p, it) } ?: p })
+
     companion object {
         /** Largest width fraction at which an image of [imageAspect] fits the sheet with a margin. */
         fun fitWidth(imageAspect: Float, sheetAspect: Float, margin: Float = 0.92f): Float =

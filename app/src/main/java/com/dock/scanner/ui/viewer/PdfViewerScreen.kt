@@ -102,9 +102,20 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlin.math.sqrt
 
 private const val MAX_ZOOM = 5f
 private const val DOUBLE_TAP_ZOOM = 2.5f
+
+/** Android won't draw a bitmap over 100 MB; 16 MP (64 MB) keeps very tall pages well below that. */
+private const val MAX_PAGE_PIXELS = 16_000_000.0
+
+/** Pixel size for rendering a page of [pageW] x [pageH] points [widthPx] wide, scaled down if it would be too big. */
+internal fun pageRenderSize(widthPx: Int, pageW: Int, pageH: Int): Pair<Int, Int> {
+    val height = widthPx.toDouble() * pageH / pageW
+    val shrink = minOf(1.0, sqrt(MAX_PAGE_PIXELS / (widthPx * height)))
+    return (widthPx * shrink).toInt().coerceAtLeast(1) to (height * shrink).toInt().coerceAtLeast(1)
+}
 
 /** Shows a saved PDF, zoomable, with its file actions in a dropdown under the name. */
 @Composable
@@ -378,8 +389,8 @@ private fun PdfPage(document: PdfRenderer, lock: Mutex, index: Int, widthPx: Int
             lock.withLock {
                 runCatching {
                     document.openPage(index).use { p ->
-                        val height = (widthPx * p.height.toFloat() / p.width).toInt()
-                        Bitmap.createBitmap(widthPx, height, Bitmap.Config.ARGB_8888).apply {
+                        val (width, height) = pageRenderSize(widthPx, p.width, p.height)
+                        Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply {
                             eraseColor(Color.WHITE)
                             p.render(this, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                         }

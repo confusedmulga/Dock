@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.util.Size
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -158,6 +159,10 @@ private fun CameraContent(vm: ScanViewModel, onDone: () -> Unit, onImported: () 
             analysisExecutor.shutdown()
         }
     }
+
+    // Back works like the close button once pages exist: they go to Review instead of staying
+    // in a session that nothing on screen shows.
+    BackHandler(enabled = retakePageId == null && pages.isNotEmpty()) { onDone() }
 
     val pickImages = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(20)) { uris ->
         if (uris.isNotEmpty()) {

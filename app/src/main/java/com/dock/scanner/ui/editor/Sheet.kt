@@ -94,7 +94,7 @@ fun SheetEditor(
     val currentOnSelect by rememberUpdatedState(onSelect)
     val currentOnChange by rememberUpdatedState(onChange)
 
-    BoxWithConstraints(modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+    Box(modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
         // aspectRatio tries the full width first and falls back to the height when that's too tall.
         Box(
             Modifier

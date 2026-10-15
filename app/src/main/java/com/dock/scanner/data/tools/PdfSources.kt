@@ -41,10 +41,9 @@ object PdfSources {
         return SourcePdf(uri, name.substringBeforeLast('.', name), size, pages, parentId)
     }
 
-    /** Copies a picked file into the app's cache, for libraries that need a real file. */
-    fun copyToCache(context: Context, uri: Uri, name: String): File {
-        val dir = File(context.cacheDir, "tools").apply { mkdirs() }
-        val file = File(dir, name)
+    /** Copies a picked file into [dir] (a scratch folder in the cache), for libraries that need a real file. */
+    fun copyToCache(context: Context, uri: Uri, dir: File, name: String): File {
+        val file = File(dir.apply { mkdirs() }, name)
         context.contentResolver.openInputStream(uri)!!.use { input -> file.outputStream().use { input.copyTo(it) } }
         return file
     }

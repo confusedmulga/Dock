@@ -13,6 +13,7 @@ import com.dock.scanner.data.tools.PdfSources
 import com.dock.scanner.data.tools.SourcePdf
 import com.dock.scanner.pdf.PasswordProtectedException
 import com.dock.scanner.pdf.PdfTools
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,6 +22,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.UUID
 import kotlin.math.roundToInt
 
 enum class PdfTool { Compress, ToImages, Merge, Split }
@@ -62,9 +64,11 @@ class ToolsViewModel(app: Application) : AndroidViewModel(app) {
     val loadingInputs: StateFlow<Boolean> = _loadingInputs.asStateFlow()
 
     private var job: Job? = null
+    private var currentRun: Run? = null
 
     /** Opens a tool, optionally with a file from the library already chosen. */
     fun start(tool: PdfTool, preset: LibraryItem? = null) {
+        currentRun?.superseded = true
         job?.cancel()
         _tool.value = tool
         _inputs.value = emptyList()
@@ -112,9 +116,9 @@ class ToolsViewModel(app: Application) : AndroidViewModel(app) {
 
     // region Tools
 
-    fun compress(settings: PdfTools.CompressSettings) = launchTool("Compressing") { root ->
+    fun compress(settings: PdfTools.CompressSettings) = launchTool("Compressing") {
         val input = _inputs.value.single()
-        val inFile = PdfSources.copyToCache(context, input.uri, "in.pdf")
+        val inFile = PdfSources.copyToCache(context, input.uri, dir, "in.pdf")
         val outFile = File(inFile.parentFile, "out.pdf")
         val result = PdfTools.compress(inFile, outFile, settings) { progress(it * 0.9f) }
         val before = size(result.originalBytes)
@@ -130,8 +134,8 @@ class ToolsViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
-    fun merge(name: String) = launchTool("Merging") { root ->
-        val files = _inputs.value.mapIndexed { i, input -> PdfSources.copyToCache(context, input.uri, "merge_$i.pdf") }
+    fun merge(name: String) = launchTool("Merging") {
+        val files = _inputs.value.mapIndexed { i, input -> PdfSources.copyToCache(context, input.uri, dir, "merge_$i.pdf") }
         progress(0.4f)
         val out = File(files.first().parentFile, "merged.pdf")
         PdfTools.merge(files, out)
@@ -141,9 +145,9 @@ class ToolsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** [ranges] null = every page on its own. */
-    fun split(ranges: List<IntRange>?) = launchTool("Splitting") { root ->
+    fun split(ranges: List<IntRange>?) = launchTool("Splitting") {
         val input = _inputs.value.single()
-        val inFile = PdfSources.copyToCache(context, input.uri, "in.pdf")
+        val inFile = PdfSources.copyToCache(context, input.uri, dir, "in.pdf")
         val parts = ranges ?: (1..input.pages).map { it..it }
         val folder = newFolder(root, input.parentId ?: library.rootId(root), "${input.name} (split)")
         val tmpDir = File(inFile.parentFile, "split").apply { deleteRecursively(); mkdirs() }
@@ -157,7 +161,7 @@ class ToolsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Each PDF gets its own folder of page images, named after it. */
-    fun toImages(dpi: Int, format: ImageFormat) = launchTool("Converting") { root ->
+    fun toImages(dpi: Int, format: ImageFormat) = launchTool("Converting") {
         val inputs = _inputs.value
         val total = inputs.sumOf { it.pages }.coerceAtLeast(1)
         var done = 0
@@ -195,29 +199,44 @@ class ToolsViewModel(app: Application) : AndroidViewModel(app) {
 
     private val context get() = getApplication<Application>()
 
-    private fun progress(value: Float) {
-        (_state.value as? ToolState.Working)?.let { _state.value = it.copy(progress = value.coerceIn(0f, 1f)) }
-    }
-
     private fun size(bytes: Long) = Formatter.formatShortFileSize(context, bytes)
 
-    private fun launchTool(label: String, block: suspend (Uri) -> ToolOutput) {
+    /**
+     * One run of a tool. Its blocking work can't be interrupted, so a run that [start] moved on
+     * from keeps going until it finishes: it gets its own scratch folder and stops reporting
+     * into the state, which belongs to the next tool by then.
+     */
+    private inner class Run(val root: Uri, val dir: File) {
+        @Volatile var superseded = false
+
+        fun progress(value: Float) {
+            if (superseded) return
+            (_state.value as? ToolState.Working)?.let { _state.value = it.copy(progress = value.coerceIn(0f, 1f)) }
+        }
+    }
+
+    private fun launchTool(label: String, block: suspend Run.() -> ToolOutput) {
         if (_state.value is ToolState.Working || _inputs.value.isEmpty()) return
         val root = library.rootUri() ?: run {
             _state.value = ToolState.Failed("Choose a storage folder first")
             return
         }
+        val tool = Run(root, File(context.cacheDir, "tools/${UUID.randomUUID()}"))
+        currentRun = tool
         _state.value = ToolState.Working(label, 0f)
         job = viewModelScope.launch {
-            _state.value = try {
-                ToolState.Done(withContext(Dispatchers.IO) { block(root) })
+            val result = try {
+                ToolState.Done(withContext(Dispatchers.IO) { tool.block() })
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: PasswordProtectedException) {
                 ToolState.Failed("Password-protected PDFs aren't supported yet")
             } catch (e: Exception) {
                 ToolState.Failed(e.message ?: "Something went wrong")
             } finally {
-                File(context.cacheDir, "tools").deleteRecursively()
+                tool.dir.deleteRecursively()
             }
+            if (!tool.superseded) _state.value = result
         }
     }
 

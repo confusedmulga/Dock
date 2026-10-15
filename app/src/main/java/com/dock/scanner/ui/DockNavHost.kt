@@ -2,10 +2,16 @@ package com.dock.scanner.ui
 
 import android.net.Uri
 import android.widget.Toast
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -61,6 +67,33 @@ fun DockNavHost() {
     LaunchedEffect(libraryVm) {
         libraryVm.messages.collect { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
     }
+    // An unsaved scan (e.g. the camera was closed with back) mustn't vanish when something else
+    // starts a new session: ask first.
+    var replacingDraft by remember { mutableStateOf<(() -> Unit)?>(null) }
+    fun newSession(start: () -> Unit) {
+        if (scanVm.pages.value.isEmpty()) start() else replacingDraft = start
+    }
+    replacingDraft?.let { start ->
+        AlertDialog(
+            onDismissRequest = { replacingDraft = null },
+            title = { Text("Discard unsaved pages?") },
+            text = { Text("You have pages that haven't been saved yet. Starting something new deletes them.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    replacingDraft = null
+                    scanVm.clear()
+                    start()
+                }) { Text("Discard", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    replacingDraft = null
+                    nav.navigate(Routes.REVIEW)
+                }) { Text("Review pages") }
+            },
+        )
+    }
+
     // Folder access can be revoked from system settings: go back to setup instead of failing silently.
     LaunchedEffect(root) {
         val current = nav.currentBackStackEntry?.destination?.route
@@ -119,13 +152,17 @@ fun DockNavHost() {
                         nav.navigate(Routes.VIEWER)
                     },
                     onEditPdf = { uri, item ->
-                        scanVm.targetFolderId = item?.parentId
-                        scanVm.openPdf(uri, item) { nav.navigate(Routes.REVIEW) }
+                        newSession {
+                            scanVm.targetFolderId = item?.parentId
+                            scanVm.openPdf(uri, item) { nav.navigate(Routes.REVIEW) }
+                        }
                     },
                     onImagesPicked = { uris ->
-                        scanVm.clear()
-                        scanVm.importImages(uris)
-                        nav.navigate(Routes.REVIEW)
+                        newSession {
+                            scanVm.clear()
+                            scanVm.importImages(uris)
+                            nav.navigate(Routes.REVIEW)
+                        }
                     },
                     onOpenTool = { tool, item ->
                         toolsVm.start(tool, item)
@@ -199,8 +236,10 @@ fun DockNavHost() {
                     vm = libraryVm,
                     onBack = { nav.popBackStack() },
                     onEdit = { item ->
-                        scanVm.targetFolderId = item.parentId
-                        scanVm.openPdf(item.uri, item) { nav.navigate(Routes.REVIEW) }
+                        newSession {
+                            scanVm.targetFolderId = item.parentId
+                            scanVm.openPdf(item.uri, item) { nav.navigate(Routes.REVIEW) }
+                        }
                     },
                     onCompress = { item ->
                         toolsVm.start(PdfTool.Compress, item)

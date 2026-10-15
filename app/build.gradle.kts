@@ -71,4 +71,6 @@ dependencies {
 
     implementation(libs.coil.compose)
     implementation(libs.haze)
+
+    testImplementation(libs.junit)
 }
